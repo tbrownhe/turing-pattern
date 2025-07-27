@@ -1,0 +1,6 @@
+name: turing
+dependencies:
+  - python
+  - numpy
+  - matplotlib
+  - mkl
