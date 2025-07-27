@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image, PngImagePlugin
 from scipy.interpolate import interp1d
+from scipy.ndimage import zoom
 
 
 def initialize_grid(w: int, h: int, noise: float = 1.0) -> tuple[np.ndarray]:
@@ -114,6 +115,7 @@ def turing_pattern(
     k_vals: list[float] = [0.056, 0.06, 0.0635, 0.0665, 0.07, 0.074],
     k_axis: str = "x",
     steps: int = 10000,
+    **kwargs,
 ) -> np.ndarray:
     """Generate turing patterns.
 
@@ -159,8 +161,8 @@ def turing_pattern(
         U += Du * Lu - reaction + F * (1 - U)
         V += Dv * Lv + reaction - (F + k) * V
 
-        # Perturb with noise occasionally to encourage evolution
-        if i % 1000 == 0 and i < 5000:
+        # Perturb with noise in the beginning to encourage evolution
+        if i % 1000 == 0 and i <= steps // 2:
             V += 0.5 * (np.random.rand(h, w) - 0.5)
 
         # Check status
@@ -183,30 +185,18 @@ def turing_pattern(
 
 
 def main():
+    # Load parameters from JSON
+    with open("turing_parameters.json", "r") as f:
+        TuringParams = json.loads(f.read())
+
     # Generate pattern
-    TuringParams = {
-        "w": 1024,
-        "h": 128,
-        "Du_ctrl": [0.0, 1.0],
-        "Du_vals": [0.7, 0.7],
-        "Du_axis": "y",
-        "Dv_ctrl": [0.0, 1.0],
-        "Dv_vals": [0.25, 0.25],
-        "Dv_axis": "y",
-        "F_ctrl": [0.0, 1.0],
-        "F_vals": [0.04, 0.08],
-        "F_axis": "x",
-        "k_ctrl": [0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
-        "k_vals": [0.056, 0.061, 0.0630, 0.0660, 0.069, 0.074],
-        "k_axis": "x",
-        "steps": 10000,
-    }
     pattern = turing_pattern(**TuringParams)
 
-    # Convert to Pillow image, 'L' = 8-bit grayscale
-    img = Image.fromarray(pattern).convert("L")
+    # Upsample image for ease of use in image editors later
+    pattern = zoom(pattern, TuringParams["upsample"], order=3)
 
-    # Add parameters as metadata (convert to JSON string)
+    # Convert to Pillow image and create metadata
+    img = Image.fromarray(pattern).convert("L")
     metadata = PngImagePlugin.PngInfo()
     metadata.add_text("TuringParams", json.dumps(TuringParams, indent=2))
 
