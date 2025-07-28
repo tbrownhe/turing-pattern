@@ -22,8 +22,8 @@ The Gray-Scott model simulates how two chemical components, U and V, react and d
 
 The core equations are:
 
-- `∂U/∂t = Dₜ * ∇²U - UV² + F(1 - U)`
-- `∂V/∂t = Dᵥ * ∇²V + UV² - (F + k)V`
+- `∂U/∂t = Du * ∇²U - UV² + F(1 - U)`
+- `∂V/∂t = Dv * ∇²V + UV² - (F + k)V`
 
 Where:
 
@@ -35,7 +35,7 @@ Where:
 
 `UV²`: Reaction term producing more V
 
-Patterns emerge when the system is destabilized by diffusion, specifically when the inhibitor (V) diffuses faster than the activator (U).
+In the general Turing two-species diffusion model, patterns emerge when the system is destabilized by diffusion, specifically when the inhibitor (V) diffuses faster than the activator (U). In the Grey-Scott case, patterns can emerge even though often `Du > Dv` due to the kinetics of autocatalysis reactions. `UV²` converts U into V. `F(1−U)` replenishes U. `(F+k)V` removes V.
 
 ## Image Generation Parameters
 
@@ -68,4 +68,4 @@ This project is licensed under the MIT License.
 
 ## Author
 
-Created by @tbrownhe as a tribute to complexity, self-organization, and the mathematical beauty underlying chaos.
+Created by @tbrownhe as a tribute to complexity, self-organization, and the mathematical beauty that often emerges from chaos.
