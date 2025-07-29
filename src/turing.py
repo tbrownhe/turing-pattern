@@ -115,6 +115,7 @@ def turing_pattern(
     k_vals: list[float] = [0.056, 0.06, 0.0635, 0.0665, 0.07, 0.074],
     k_axis: str = "x",
     steps: int = 10000,
+    upsample=2,
     **kwargs,
 ) -> np.ndarray:
     """Generate turing patterns.
@@ -149,10 +150,11 @@ def turing_pattern(
     k = parameter_map(w, h, k_ctrl, k_vals, axis=k_axis)
 
     # Plot setup
-    plt.ion()
-    _, ax = plt.subplots()
-    img = ax.imshow(V, cmap="gray", vmin=0, vmax=1)
-    plt.title("Gray-Scott Turing Pattern")
+    if False:
+        plt.ion()
+        _, ax = plt.subplots()
+        img = ax.imshow(V, cmap="gray", vmin=0, vmax=1)
+        plt.title("Gray-Scott Turing Pattern")
 
     for i in range(steps):
         # Compute diffusion
@@ -176,12 +178,16 @@ def turing_pattern(
                 )
 
             # Plot update
-            img.set_data(V)
-            img.set_clim(vmin=V.min(), vmax=V.max())
-            plt.pause(0.1)
+            if False:
+                img.set_data(V)
+                img.set_clim(vmin=V.min(), vmax=V.max())
+                plt.pause(0.1)
 
-    # Return normalized V
-    return (255 * (V - V.min()) / (V.max() - V.min())).astype(np.uint8)
+    # Normalize V
+    V_norm = (255 * (V - V.min()) / (V.max() - V.min())).astype(np.uint8)
+
+    # Upsample image for ease of use in image editors later
+    return zoom(V_norm, upsample, order=3)
 
 
 def main():
@@ -191,9 +197,6 @@ def main():
 
     # Generate pattern
     pattern = turing_pattern(**TuringParams)
-
-    # Upsample image for ease of use in image editors later
-    pattern = zoom(pattern, TuringParams["upsample"], order=3)
 
     # Convert to Pillow image and create metadata
     img = Image.fromarray(pattern).convert("L")
