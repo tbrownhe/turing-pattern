@@ -5,3 +5,4 @@ dependencies:
   - scipy
   - matplotlib
   - mkl
+  - fastapi
