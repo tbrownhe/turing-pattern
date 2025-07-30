@@ -1,12 +1,13 @@
+import asyncio
 import base64
 from io import BytesIO
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from PIL import Image
 
-from src.turing import turing_pattern
+from src.turing import TuringSimulator, turing_pattern
 
 app = FastAPI()
 
@@ -54,3 +55,34 @@ def generate(
     img.save(buf, format="PNG")
     buf.seek(0)
     return StreamingResponse(buf, media_type="image/png")
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+
+    # Get initial slider positions and kick off sim class
+    msg = await websocket.receive_json()
+    sim = TuringSimulator(**msg)
+
+    async def receive_controls():
+        while True:
+            msg = await websocket.receive_json()
+            if msg.get("type") == "seed":
+                sim.seed()
+            else:
+                sim.update_controls(msg)
+
+    # Kick off a concurrent task to receive updates
+    receiver = asyncio.create_task(receive_controls())
+
+    try:
+        while True:
+            frame = sim.step(steps=25)
+            buf = BytesIO()
+            Image.fromarray(frame).save(buf, format="PNG")
+            buf.seek(0)
+            await websocket.send_bytes(buf.read())
+            await asyncio.sleep(0.05)
+    except WebSocketDisconnect:
+        receiver.cancel()

@@ -1,29 +1,56 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 function App() {
-    const [F1, setF1] = useState(0.04);
-    const [F2, setF2] = useState(0.08);
-    const [K1, setK1] = useState(0.056);
-    const [K2, setK2] = useState(0.074);
-    const [Du1, setDu1] = useState(0.7);
-    const [Du2, setDu2] = useState(0.7);
-    const [Dv1, setDv1] = useState(0.25);
-    const [Dv2, setDv2] = useState(0.25);
-    const [imgSrc, setImgSrc] = useState<string>("/placeholder.png");
-    const [loading, setLoading] = useState(false);
+  const [F1, setF1] = useState(0.04);
+  const [F2, setF2] = useState(0.08);
+  const [K1, setK1] = useState(0.056);
+  const [K2, setK2] = useState(0.074);
+  const [Du1, setDu1] = useState(0.7);
+  const [Du2, setDu2] = useState(0.7);
+  const [Dv1, setDv1] = useState(0.25);
+  const [Dv2, setDv2] = useState(0.25);
+  const [imgSrc, setImgSrc] = useState<string>("/placeholder.png");
+  const socket = useRef<WebSocket | null>(null);
 
-  const generatePattern = async () => {
-    setLoading(true);
-    try {
-      const response = await fetch(`http://localhost:8000/generate?F1=${F1}&F2=${F2}&K1=${K1}&K2=${K2}&Du1=${Du1}&Du2=${Du2}&Dv1=${Dv1}&Dv2=${Dv2}`);
-      const blob = await response.blob();
+  const sendParams = () => {
+    if (socket.current?.readyState === WebSocket.OPEN) {
+      socket.current.send(
+        JSON.stringify({
+          F1, F2, K1, K2, Du1, Du2, Dv1, Dv2
+        })
+      );
+    }
+  };
+
+  const sendSeed = () => {
+    if (socket.current?.readyState === WebSocket.OPEN) {
+      socket.current.send(JSON.stringify({ type: "seed" }));
+    }
+  };
+
+  useEffect(() => {
+    socket.current = new WebSocket("ws://localhost:8000/ws");
+    socket.current.binaryType = "blob";
+
+    socket.current.onmessage = (event) => {
+      const blob = event.data;
       const imageUrl = URL.createObjectURL(blob);
       setImgSrc(imageUrl);
-    } catch (err) {
-      console.error('Failed to fetch pattern:', err);
-    }
-    setLoading(false);
-  };
+    };
+
+    socket.current.onopen = () => {
+      console.log("WebSocket connected");
+      sendParams(); // send initial slider values
+    };
+
+    socket.current.onclose = () => {
+      console.log("WebSocket disconnected");
+    };
+
+    return () => {
+      socket.current?.close();
+    };
+  }, []);
 
 
   return (
@@ -36,11 +63,11 @@ function App() {
         <div className="col-span-3 flex flex-col items-end space-y-2">
           <div>
             <label>Du (top): {Du1.toFixed(4)}</label>
-            <input type="range" min="0.01" max="1" step="0.001" value={Du1} onChange={(e) => setDu1(parseFloat(e.target.value))} />
+            <input type="range" min="0.01" max="1" step="0.001" value={Du1} onChange={(e) => { setDu1(parseFloat(e.target.value)); sendParams(); }} />
           </div>
           <div>
             <label>Dv (top): {Dv1.toFixed(4)}</label>
-            <input type="range" min="0.01" max="1" step="0.001" value={Dv1} onChange={(e) => setDv1(parseFloat(e.target.value))} />
+            <input type="range" min="0.01" max="1" step="0.001" value={Dv1} onChange={(e) => { setDv1(parseFloat(e.target.value)); sendParams(); }} />
           </div>
         </div>
 
@@ -49,11 +76,11 @@ function App() {
         <div className="flex flex-col items-end space-y-2">
           <div>
             <label>F (left): {F1.toFixed(4)}</label>
-            <input type="range" min="0.01" max="0.1" step="0.001" value={F1} onChange={(e) => setF1(parseFloat(e.target.value))} />
+            <input type="range" min="0.01" max="0.1" step="0.001" value={F1} onChange={(e) => { setF1(parseFloat(e.target.value)); sendParams(); }} />
           </div>
           <div>
             <label>K (left): {K1.toFixed(4)}</label>
-            <input type="range" min="0.01" max="0.1" step="0.001" value={K1} onChange={(e) => setK1(parseFloat(e.target.value))} />
+            <input type="range" min="0.01" max="0.1" step="0.001" value={K1} onChange={(e) => { setK1(parseFloat(e.target.value)); sendParams(); }} />
           </div>
         </div>
 
@@ -66,11 +93,11 @@ function App() {
         <div className="flex flex-col items-start space-y-2">
           <div>
             <label>F (right): {F2.toFixed(4)}</label>
-            <input type="range" min="0.01" max="0.1" step="0.001" value={F2} onChange={(e) => setF2(parseFloat(e.target.value))} />
+            <input type="range" min="0.01" max="0.1" step="0.001" value={F2} onChange={(e) => { setF2(parseFloat(e.target.value)); sendParams(); }} />
           </div>
           <div>
             <label>K (right): {K2.toFixed(4)}</label>
-            <input type="range" min="0.01" max="0.1" step="0.001" value={K2} onChange={(e) => setK2(parseFloat(e.target.value))} />
+            <input type="range" min="0.01" max="0.1" step="0.001" value={K2} onChange={(e) => { setK2(parseFloat(e.target.value)); sendParams(); }} />
           </div>
         </div>
 
@@ -78,20 +105,20 @@ function App() {
         <div className="col-span-3 flex flex-col items-end space-y-2">
           <div>
             <label>Du (bottom): {Du2.toFixed(4)}</label>
-            <input type="range" min="0.1" max="1" step="0.001" value={Du2} onChange={(e) => setDu2(parseFloat(e.target.value))} />
+            <input type="range" min="0.01" max="1" step="0.001" value={Du2} onChange={(e) => { setDu2(parseFloat(e.target.value)); sendParams(); }} />
           </div>
           <div>
             <label>Dv (bottom): {Dv2.toFixed(4)}</label>
-            <input type="range" min="0.1" max="1" step="0.001" value={Dv2} onChange={(e) => setDv2(parseFloat(e.target.value))} />
+            <input type="range" min="0.01" max="1" step="0.001" value={Dv2} onChange={(e) => { setDv2(parseFloat(e.target.value)); sendParams(); }} />
           </div>
         </div>
 
         {/* Button */}
         <div className="col-span-3 flex flex-col place-items-center space-y-2">
           <div>
-            <button className="mb-2 px-4 py-2 bg-blue-600 text-white rounded" onClick={generatePattern}>
-              {loading ? "Generating..." : "Generate"}
-            </button>
+              <button onClick={sendSeed} className="bg-indigo-600 text-white px-4 py-2 rounded">
+                Shake
+              </button>
           </div>
           <div>
             <a href={imgSrc} download="pattern.png" className="mt-4 inline-block px-4 py-2 bg-blue-500 text-white rounded">

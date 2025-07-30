@@ -8,6 +8,61 @@ from scipy.interpolate import interp1d
 from scipy.ndimage import zoom
 
 
+class TuringSimulator:
+    def __init__(self, shape=(256, 256), **initial_params):
+        self.shape = shape
+        self.rgb = False
+        self.reset()
+        self.update_controls(initial_params)
+
+    def reset(self):
+        self.U = np.ones(self.shape)
+        self.V = np.zeros(self.shape)
+        self.seed()
+
+    def seed(self, noise: float = 1.0):
+        self.U += noise * (np.random.rand(*self.shape) - 0.5)
+        self.V += noise * (np.random.rand(*self.shape) - 0.5)
+
+    def update_controls(self, params):
+        self.F = np.linspace(params["F1"], params["F2"], self.shape[1])[None, :].repeat(
+            self.shape[0], axis=0
+        )
+        self.k = np.linspace(params["K1"], params["K2"], self.shape[1])[None, :].repeat(
+            self.shape[0], axis=0
+        )
+        self.Du = np.linspace(params["Du1"], params["Du2"], self.shape[0])[
+            :, None
+        ].repeat(self.shape[1], axis=1)
+        self.Dv = np.linspace(params["Dv1"], params["Dv2"], self.shape[0])[
+            :, None
+        ].repeat(self.shape[1], axis=1)
+
+    def react(self):
+        Lu, Lv = laplacian(self.U), laplacian(self.V)
+        reaction = self.U * self.V * self.V
+        self.U += self.Du * Lu - reaction + self.F * (1 - self.U)
+        self.V += self.Dv * Lv + reaction - (self.F + self.k) * self.V
+
+        # Check for invalid sim results.
+        if np.isnan(self.U).any() or np.isnan(self.V).any():
+            self.reset()
+
+    def img_norm(self, Z):
+        return (255 * (Z - Z.min()) / (Z.max() - Z.min())).astype(np.uint8)
+
+    def step(self, steps: int = 1):
+        for _ in range(steps):
+            self.react()
+
+        if self.rgb:
+            u_img = self.img_norm(self.U)
+            v_img = self.img_norm(self.V)
+            return np.stack([u_img, np.zeros_like(u_img), v_img], axis=-1)
+        else:
+            return self.img_norm(self.V)
+
+
 def initialize_grid(w: int, h: int, noise: float = 1.0) -> tuple[np.ndarray]:
     """Seed with random noise
 
