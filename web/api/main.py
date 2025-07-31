@@ -1,5 +1,5 @@
 import asyncio
-import base64
+import time
 from io import BytesIO
 
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
@@ -8,6 +8,10 @@ from fastapi.responses import StreamingResponse
 from PIL import Image
 
 from src.turing import TuringSimulator, turing_pattern
+
+MAX_SIMS = 4
+MAX_IDLE = 600
+sim_semaphore = asyncio.Semaphore(MAX_SIMS)
 
 app = FastAPI()
 
@@ -59,30 +63,61 @@ def generate(
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    try:
+        await asyncio.wait_for(sim_semaphore.acquire(), timeout=0.5)
+    except asyncio.TimeoutError:
+        await websocket.accept()
+        await websocket.send_json(
+            {
+                "error": f"Server busy. Maximum of {MAX_SIMS} simulations has been reached."
+            }
+        )
+        await websocket.close()
+        return
+
     await websocket.accept()
-
-    # Get initial slider positions and kick off sim class
-    msg = await websocket.receive_json()
-    sim = TuringSimulator(**msg)
-
-    async def receive_controls():
-        while True:
-            msg = await websocket.receive_json()
-            if msg.get("type") == "seed":
-                sim.seed()
-            else:
-                sim.update_controls(msg)
-
-    # Kick off a concurrent task to receive updates
-    receiver = asyncio.create_task(receive_controls())
+    last_time = time.time()
 
     try:
-        while True:
-            frame = sim.step(steps=25)
-            buf = BytesIO()
-            Image.fromarray(frame).save(buf, format="PNG")
-            buf.seek(0)
-            await websocket.send_bytes(buf.read())
-            await asyncio.sleep(0.05)
-    except WebSocketDisconnect:
-        receiver.cancel()
+        # Get initial slider positions and kick off sim class
+        msg = await websocket.receive_json()
+        sim = TuringSimulator(**msg)
+
+        # Create async task for updating control maps
+        async def receive_controls():
+            nonlocal last_time
+            while True:
+                msg = await websocket.receive_json()
+                if msg.get("type") == "seed":
+                    sim.seed()
+                else:
+                    sim.update_controls(msg)
+
+                # Reset timer if user provides input
+                last_time = time.time()
+
+        receiver = asyncio.create_task(receive_controls())
+
+        # Serve simulation to websocket
+        try:
+            while True:
+                # Kill sessions that have been running without input for >5min
+                if time.time() - last_time > MAX_IDLE:
+                    await websocket.send_json(
+                        {"error": f"Session timed out after {MAX_IDLE} seconds."}
+                    )
+                    await websocket.close()
+                    break
+
+                frame = sim.step(steps=25)
+                buf = BytesIO()
+                Image.fromarray(frame).save(buf, format="PNG")
+                buf.seek(0)
+                await websocket.send_bytes(buf.read())
+                await asyncio.sleep(0.05)
+        except WebSocketDisconnect:
+            pass
+        finally:
+            receiver.cancel()
+    finally:
+        sim_semaphore.release()

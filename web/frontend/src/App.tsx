@@ -32,12 +32,6 @@ function App() {
     socket.current = new WebSocket("ws://localhost:8000/ws");
     socket.current.binaryType = "blob";
 
-    socket.current.onmessage = (event) => {
-      const blob = event.data;
-      const imageUrl = URL.createObjectURL(blob);
-      setImgSrc(imageUrl);
-    };
-
     socket.current.onopen = () => {
       console.log("WebSocket connected");
       sendParams(); // send initial slider values
@@ -45,6 +39,27 @@ function App() {
 
     socket.current.onclose = () => {
       console.log("WebSocket disconnected");
+    };
+
+    // Handle things coming from server. They can be images or json strings.
+    socket.current!.onmessage = (event) => {
+      if (typeof event.data === "string") {
+        try {
+          const msg = JSON.parse(event.data);
+          console.log(msg);
+          if (msg.error) {
+            alert(msg.error);
+            socket.current?.close();
+            return;
+          }
+        } catch {
+          console.warn("Received unexpected text message:", event.data);
+        }
+      } else {
+        const blob = new Blob([event.data], { type: "image/png" });
+        const url = URL.createObjectURL(blob);
+        setImgSrc(url);
+      }
     };
 
     return () => {
