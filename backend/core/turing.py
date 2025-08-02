@@ -247,7 +247,7 @@ def turing_pattern(
 
 def main():
     # Load parameters from JSON
-    with open("turing_parameters.json", "r") as f:
+    with open("core/turing_parameters.json", "r") as f:
         TuringParams = json.loads(f.read())
 
     # Generate pattern

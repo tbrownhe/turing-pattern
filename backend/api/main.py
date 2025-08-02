@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from PIL import Image
 
-from src.turing import TuringSimulator, turing_pattern
+from backend.core.turing import TuringSimulator, turing_pattern
 
 MAX_SIMS = 4
 MAX_IDLE = 600
