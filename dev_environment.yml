@@ -1,6 +1,6 @@
 name: turing
 dependencies:
-  - python
+  - python>=3.11,<3.12
   - numpy
   - scipy
   - matplotlib
