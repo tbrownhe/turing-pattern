@@ -9,7 +9,7 @@ services:
       - "8000:8000"   # Expose FastAPI backend at http://localhost:8000
 
   frontend:
-    image: 'frontend:${TAG:-latest}'
+    image: nginx:alpine
     restart: always
     build:
       context: ./frontend
