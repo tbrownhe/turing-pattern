@@ -4,8 +4,13 @@ WORKDIR /app
 
 # Install dependencies and build
 COPY package*.json /app/
+
 RUN npm install
+
 COPY ./ /app/
+
+ARG VITE_API_URL=${VITE_API_URL}
+
 RUN npm run build
 
 # Stage 2: Serve with Nginx
