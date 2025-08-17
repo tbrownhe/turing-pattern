@@ -29,7 +29,10 @@ function App() {
   };
 
   useEffect(() => {
-    socket.current = new WebSocket("ws://localhost:8000/ws");
+    const baseApiUrl = import.meta.env.VITE_API_URL || "http://localhost:8000";
+    const wsProtocol = baseApiUrl.startsWith("https") ? "wss" : "ws";
+    const wsUrl = baseApiUrl.replace(/^https?/, wsProtocol) + "/ws";
+    socket.current = new WebSocket(wsUrl);
     socket.current.binaryType = "blob";
 
     socket.current.onopen = () => {

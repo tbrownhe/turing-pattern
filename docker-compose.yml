@@ -24,8 +24,8 @@ services:
       - default
     build:
       context: ./frontend
-      #args:
-      #  - VITE_API_URL=https://api.${DOMAIN}
+      args:
+        - VITE_API_URL=https://api.${DOMAIN}
     labels:
       - traefik.enable=true
       - traefik.docker.network=traefik-public
