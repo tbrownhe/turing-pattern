@@ -1,7 +1,6 @@
 import json
 from datetime import datetime
 
-import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image, PngImagePlugin
 from scipy.interpolate import interp1d
@@ -63,24 +62,6 @@ class TuringSimulator:
             return self.img_norm(self.V)
 
 
-def initialize_grid(w: int, h: int, noise: float = 1.0) -> tuple[np.ndarray]:
-    """Seed with random noise
-
-    Args:
-        w (int): Image pixel width
-        h (int): image pixel height
-        noise (float, optional): amplitude of initial noise. Defaults to 1.0.
-
-    Returns:
-        tuple[np.ndarray]: Initial map signals
-    """
-    U = np.ones((h, w))
-    V = np.zeros((h, w))
-    U += noise * (np.random.rand(h, w) - 0.5)
-    V += noise * (np.random.rand(h, w) - 0.5)
-    return U, V
-
-
 def laplacian(Z: np.ndarray) -> np.ndarray:
     """Applies laplacian transform.
 
@@ -102,6 +83,24 @@ def laplacian(Z: np.ndarray) -> np.ndarray:
             + np.roll(np.roll(Z, -1, 0), -1, 1)
         )
     )
+
+
+def initialize_grid(w: int, h: int, noise: float = 1.0) -> tuple[np.ndarray]:
+    """Seed with random noise
+
+    Args:
+        w (int): Image pixel width
+        h (int): image pixel height
+        noise (float, optional): amplitude of initial noise. Defaults to 1.0.
+
+    Returns:
+        tuple[np.ndarray]: Initial map signals
+    """
+    U = np.ones((h, w))
+    V = np.zeros((h, w))
+    U += noise * (np.random.rand(h, w) - 0.5)
+    V += noise * (np.random.rand(h, w) - 0.5)
+    return U, V
 
 
 def parameter_map(
@@ -204,13 +203,6 @@ def turing_pattern(
     F = parameter_map(w, h, F_ctrl, F_vals, axis=F_axis)
     k = parameter_map(w, h, k_ctrl, k_vals, axis=k_axis)
 
-    # Plot setup
-    if False:
-        plt.ion()
-        _, ax = plt.subplots()
-        img = ax.imshow(V, cmap="gray", vmin=0, vmax=1)
-        plt.title("Gray-Scott Turing Pattern")
-
     for i in range(steps):
         # Compute diffusion
         Lu, Lv = laplacian(U), laplacian(V)
@@ -231,12 +223,6 @@ def turing_pattern(
                 raise ValueError(
                     f"Model collapsed by step {i}. Brightness range is to small: {ran}"
                 )
-
-            # Plot update
-            if False:
-                img.set_data(V)
-                img.set_clim(vmin=V.min(), vmax=V.max())
-                plt.pause(0.1)
 
     # Normalize V
     V_norm = (255 * (V - V.min()) / (V.max() - V.min())).astype(np.uint8)

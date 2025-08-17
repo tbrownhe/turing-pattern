@@ -9,6 +9,7 @@ from PIL import Image
 
 from app.core.turing import TuringSimulator, turing_pattern
 
+# Prevent overload and abuse
 MAX_SIMS = 4
 MAX_IDLE = 600
 sim_semaphore = asyncio.Semaphore(MAX_SIMS)
