@@ -40,6 +40,28 @@ Open <http://localhost:3000>. The backend is also bound to
 <http://127.0.0.1:8000> for local API inspection, and its docs are available at
 <http://127.0.0.1:8000/docs>. Both published ports bind only to loopback.
 
+### Test from another device on the LAN
+
+LAN exposure is opt-in. Keep the backend private and publish only the same-origin
+frontend proxy. In `.env`, set:
+
+```dotenv
+TURING_LOCAL_BIND_ADDRESS=0.0.0.0
+TURING_LOCAL_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://192.168.1.71:3000
+```
+
+Replace `192.168.1.71` if the development machine's address changes, then recreate
+the local containers:
+
+```console
+docker compose -f docker-compose.local.yml up -d --build --force-recreate
+```
+
+Open <http://192.168.1.71:3000> on the phone. If the page is still unreachable,
+allow inbound TCP port 3000 on the development machine's **private** firewall
+profile and confirm both devices are on the same non-isolated LAN. Do not expose
+port 8000; Nginx already proxies `/api` and `/ws` to the private backend.
+
 ## Develop without rebuilding containers
 
 Backend, from the repository root:

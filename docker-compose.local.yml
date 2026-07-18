@@ -7,7 +7,7 @@ services:
     environment:
       OPENBLAS_NUM_THREADS: ${OPENBLAS_NUM_THREADS:-1}
       OMP_NUM_THREADS: ${OMP_NUM_THREADS:-1}
-      TURING_ALLOWED_ORIGINS: http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173
+      TURING_ALLOWED_ORIGINS: ${TURING_LOCAL_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173}
       TURING_ENABLE_DOCS: "true"
       TURING_MAX_COMPUTE_JOBS: ${TURING_MAX_COMPUTE_JOBS:-2}
       TURING_MAX_COMPUTE_WAITERS: ${TURING_MAX_COMPUTE_WAITERS:-2}
@@ -42,7 +42,7 @@ services:
     build:
       context: ./frontend
     ports:
-      - "127.0.0.1:3000:8080"
+      - "${TURING_LOCAL_BIND_ADDRESS:-127.0.0.1}:3000:8080"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
       interval: 10s

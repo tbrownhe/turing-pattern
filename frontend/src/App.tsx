@@ -700,6 +700,48 @@ function App() {
             </button>
           </div>
 
+          <fieldset className="simulation-controls">
+            <legend>Simulation</legend>
+            <div className="actions">
+              <button className="button button-primary" onClick={togglePaused} disabled={!canControl}>
+                {userPaused ? 'Resume' : 'Pause'}
+              </button>
+              <button className="button" onClick={stepOnce} disabled={!canControl}>Step once</button>
+              <button className="button" onClick={restartCurrentSeed} disabled={!canControl}>Restart same seed</button>
+              <button className="button" onClick={randomSeed} disabled={!canControl}>Random seed</button>
+              <button className="button" onClick={perturb} disabled={!canControl}>Perturb state</button>
+              <button className="button" onClick={downloadPreview} disabled={!hasFrame}>Download preview</button>
+            </div>
+            <div className="history-actions" aria-label="Recipe history">
+              <button className="button button-small" onClick={undoRecipe} disabled={!canControl || historyCounts.undo === 0}>
+                Undo recipe
+              </button>
+              <button className="button button-small" onClick={redoRecipe} disabled={!canControl || historyCounts.redo === 0}>
+                Redo recipe
+              </button>
+              <span>Up to {HISTORY_LIMIT} recipe changes</span>
+            </div>
+            <div className="comparison-actions" aria-label="Before and after comparison">
+              <button className="button button-small" onClick={captureBefore} disabled={!hasFrame}>
+                Set current as before
+              </button>
+              {comparison && (
+                <>
+                  <button className="button button-small" onClick={() => setShowBefore((value) => !value)}>
+                    {showBefore ? 'View current' : 'View before'}
+                  </button>
+                  <button className="button button-small" onClick={restoreBefore} disabled={!canControl}>
+                    Restore before recipe
+                  </button>
+                </>
+              )}
+            </div>
+            <p className="preview-note">
+              Preview: {previewSize} × {previewSize}px. Control changes evolve the current state;
+              presets and seed changes restart it. Perturbation changes the state, not the saved recipe.
+            </p>
+          </fieldset>
+
           <fieldset className="display-controls">
             <legend>Preview display</legend>
             <div className="slider-label">
@@ -750,71 +792,34 @@ function App() {
         </aside>
 
         <div className="preview-column">
-          <div className={`preview-frame ${hasFrame ? 'has-frame' : ''}`}>
-            {comparison && showBefore && (
-              <img
-                src={comparison.imageUrl}
-                alt="Saved before comparison"
+          <div className="preview-sticky">
+            <div className={`preview-frame ${hasFrame ? 'has-frame' : ''}`}>
+              {comparison && showBefore && (
+                <img
+                  src={comparison.imageUrl}
+                  alt="Saved before comparison"
+                  style={{
+                    filter: `contrast(${previewContrast})`,
+                    transform: `scale(${previewZoom})`,
+                  }}
+                />
+              )}
+              <canvas
+                ref={canvasRef}
+                width={previewSize}
+                height={previewSize}
+                role="img"
+                aria-label="Live grayscale Turing pattern preview"
+                hidden={showBefore}
                 style={{
                   filter: `contrast(${previewContrast})`,
                   transform: `scale(${previewZoom})`,
                 }}
               />
-            )}
-            <canvas
-              ref={canvasRef}
-              width={previewSize}
-              height={previewSize}
-              role="img"
-              aria-label="Live grayscale Turing pattern preview"
-              hidden={showBefore}
-              style={{
-                filter: `contrast(${previewContrast})`,
-                transform: `scale(${previewZoom})`,
-              }}
-            />
-            {!hasFrame && !showBefore && <span>Waiting for the first pattern…</span>}
+              {!hasFrame && !showBefore && <span>Waiting for the first pattern…</span>}
+            </div>
           </div>
-          <div className="actions">
-            <button className="button button-primary" onClick={togglePaused} disabled={!canControl}>
-              {userPaused ? 'Resume' : 'Pause'}
-            </button>
-            <button className="button" onClick={stepOnce} disabled={!canControl}>Step once</button>
-            <button className="button" onClick={restartCurrentSeed} disabled={!canControl}>Restart same seed</button>
-            <button className="button" onClick={randomSeed} disabled={!canControl}>Random seed</button>
-            <button className="button" onClick={perturb} disabled={!canControl}>Perturb state</button>
-            <button className="button" onClick={downloadPreview} disabled={!hasFrame}>Download preview</button>
-          </div>
-          <div className="history-actions" aria-label="Recipe history">
-            <button className="button button-small" onClick={undoRecipe} disabled={!canControl || historyCounts.undo === 0}>
-              Undo recipe
-            </button>
-            <button className="button button-small" onClick={redoRecipe} disabled={!canControl || historyCounts.redo === 0}>
-              Redo recipe
-            </button>
-            <span>Up to {HISTORY_LIMIT} recipe changes</span>
-          </div>
-          <div className="comparison-actions" aria-label="Before and after comparison">
-            <button className="button button-small" onClick={captureBefore} disabled={!hasFrame}>
-              Set current as before
-            </button>
-            {comparison && (
-              <>
-                <button className="button button-small" onClick={() => setShowBefore((value) => !value)}>
-                  {showBefore ? 'View current' : 'View before'}
-                </button>
-                <button className="button button-small" onClick={restoreBefore} disabled={!canControl}>
-                  Restore before recipe
-                </button>
-              </>
-            )}
-          </div>
-          <p className="preview-note">
-            Preview: {previewSize} × {previewSize}px. Control changes evolve the current state;
-            presets and seed changes restart it. Perturbation changes the state, not the saved recipe.
-          </p>
         </div>
-      </section>
 
       <details ref={advancedRef} className="advanced-panel">
         <summary>
@@ -870,6 +875,7 @@ function App() {
           </div>
         )}
       </details>
+      </section>
     </main>
   )
 }

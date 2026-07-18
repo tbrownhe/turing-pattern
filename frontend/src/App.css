@@ -95,7 +95,7 @@ h1 {
 }
 
 .control-panel,
-.preview-column,
+.preview-sticky,
 .advanced-panel {
   border: 1px solid var(--line);
   border-radius: 1rem;
@@ -107,8 +107,8 @@ h1 {
 }
 
 .basic-panel {
-  position: sticky;
-  top: 1rem;
+  grid-column: 1;
+  grid-row: 1;
 }
 
 .panel-heading {
@@ -193,18 +193,24 @@ h1 {
   background: rgba(183, 239, 98, 0.08);
 }
 
-.display-controls {
+.display-controls,
+.simulation-controls {
   margin: 1rem 0 0;
   padding: 0.8rem;
   border: 1px solid var(--line);
   border-radius: 0.65rem;
 }
 
-.display-controls legend {
+.display-controls legend,
+.simulation-controls legend {
   padding: 0 0.35rem;
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 700;
+}
+
+.simulation-controls .actions {
+  margin-top: 0.15rem;
 }
 
 .display-slider-label {
@@ -231,6 +237,15 @@ h1 {
 }
 
 .preview-column {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  min-width: 0;
+  align-self: stretch;
+}
+
+.preview-sticky {
+  position: sticky;
+  top: 1rem;
   padding: clamp(0.75rem, 2vw, 1.25rem);
 }
 
@@ -238,6 +253,8 @@ h1 {
   position: relative;
   display: grid;
   width: 100%;
+  max-width: min(100%, calc(100dvh - 4rem));
+  margin-inline: auto;
   overflow: hidden;
   place-items: center;
   aspect-ratio: 1;
@@ -354,7 +371,9 @@ input[type="range"]:focus-visible,
 }
 
 .advanced-panel {
-  margin-top: 1rem;
+  grid-column: 1;
+  grid-row: 2;
+  margin-top: 0;
   overflow: hidden;
 }
 
@@ -379,13 +398,13 @@ input[type="range"]:focus-visible,
 
 .advanced-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 1rem;
   padding: 1rem;
 }
 
 .uniform-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
 }
 
 .advanced-grid .control-panel {
@@ -434,11 +453,31 @@ input[type="range"] {
   }
 
   .preview-column {
+    display: contents;
+  }
+
+  .preview-sticky {
+    grid-column: 1;
     grid-row: 1;
+    top: 0.5rem;
+    z-index: 20;
+    max-height: 52dvh;
+    padding: 0.5rem;
+    border-radius: 0.75rem;
+    box-shadow: 0 0.75rem 2rem rgba(0, 0, 0, 0.42);
+  }
+
+  .preview-frame {
+    max-width: min(100%, calc(52dvh - 1rem));
   }
 
   .basic-panel {
-    position: static;
+    grid-row: 2;
+  }
+
+  .advanced-panel {
+    grid-column: 1;
+    grid-row: 3;
   }
 }
 

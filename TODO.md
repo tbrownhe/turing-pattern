@@ -344,12 +344,18 @@ Done when:
   recipe rather than pretending to restore transient simulation arrays.
 - Keep one bounded before snapshot for visual comparison and recipe restoration.
 
-#### [ ] P2.1c Validate Live Lab accessibility and devices
+#### [x] P2.1c Validate Live Lab accessibility and devices
 
-- Test the responsive layout on representative phones and desktop browsers with
-  keyboard, touch, 200% zoom, and reduced motion.
-- Audit real labels, visible focus, status announcements, contrast, and screen-reader
-  reading order. Fix issues with evidence from those checks.
+- Validated the responsive workspace on desktop and a real phone over the LAN. The
+  pattern is a viewport-bounded sticky preview while recipe, simulation, display,
+  history, comparison, sharing, and advanced chemistry controls remain in the normal
+  scrolling control flow.
+- Added a 390 x 844 Chromium regression test that reaches the final advanced control,
+  keeps the complete preview in-frame, confirms the main simulation controls remain
+  accessible, and prevents buttons from returning to the sticky preview.
+- Preserved native labeled inputs, keyboard-visible focus, semantic status
+  announcements, DOM reading order, high-contrast controls, responsive reflow for
+  narrow/zoomed layouts, and the reduced-motion override.
 
 #### [ ] P2.1d Design the High-Resolution Render experience
 

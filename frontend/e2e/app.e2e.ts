@@ -47,3 +47,31 @@ test('a visitor receives a live frame and can tune a control', async ({ page }) 
   await page.getByRole('button', { name: 'Step once' }).click()
   await expect(page.getByText('Simulation paused')).toBeVisible()
 })
+
+test('the preview remains fully visible while phone controls scroll', async ({ page }) => {
+  const viewport = { width: 390, height: 844 }
+  await page.setViewportSize(viewport)
+  await page.goto('/')
+
+  const previewPanel = page.locator('.preview-sticky')
+  const previewFrame = page.locator('.preview-frame')
+  await expect(previewPanel).toHaveCSS('position', 'sticky')
+  await expect(previewPanel.getByRole('button')).toHaveCount(0)
+
+  const pauseButton = page.locator('.simulation-controls').getByRole('button', {
+    name: 'Pause',
+  })
+  await pauseButton.scrollIntoViewIfNeeded()
+  await expect(pauseButton).toBeVisible()
+
+  await page.getByText('Advanced chemistry').click()
+  const lastControl = page.getByRole('slider', { name: /V diffusion.*bottom/ })
+  await lastControl.scrollIntoViewIfNeeded()
+
+  await expect(lastControl).toBeVisible()
+  await expect(previewFrame).toBeInViewport()
+  const previewBox = await previewFrame.boundingBox()
+  expect(previewBox).not.toBeNull()
+  expect(previewBox!.y).toBeGreaterThanOrEqual(0)
+  expect(previewBox!.y + previewBox!.height).toBeLessThanOrEqual(viewport.height)
+})
