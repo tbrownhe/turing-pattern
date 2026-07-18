@@ -76,9 +76,10 @@ live-frame smoke test.
 
 ## Live Lab recipes
 
-The basic panel starts from mixed, spots, worms, coral, or maze families and keeps
-the exact numerical controls in the Advanced panel. A recipe contains only compact,
-validated metadata—never the evolving concentration arrays:
+The basic panel starts from mixed, spots, worms, coral, maze, or the order–disorder
+transition pictured above, and keeps the exact numerical controls in the Advanced
+panel. A recipe contains only compact, validated metadata—never the evolving
+concentration arrays:
 
 ```json
 {

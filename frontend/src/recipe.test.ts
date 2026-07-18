@@ -32,6 +32,19 @@ describe('pattern recipes', () => {
     })
   })
 
+  it('keeps the README order-disorder transition recipe exact', () => {
+    expect(recipeForPreset('order-disorder').controls).toEqual({
+      F1: 0.067,
+      F2: 0.043,
+      K1: 0.059,
+      K2: 0.076,
+      Du1: 0.72,
+      Du2: 0.72,
+      Dv1: 0.25,
+      Dv2: 0.25,
+    })
+  })
+
   it('preserves an old preset recipe but labels it custom after definitions change', () => {
     const staleMaze = {
       ...recipeForPreset('maze'),

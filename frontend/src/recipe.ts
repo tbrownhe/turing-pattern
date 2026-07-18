@@ -10,7 +10,13 @@ export const CURRENT_ENGINE_VERSION = '2.0.0'
 export const RECIPE_STORAGE_KEY = 'turing-pattern.recipe.v1'
 export const RECIPE_QUERY_KEY = 'recipe'
 
-export type PresetId = 'mixed' | 'spots' | 'worms' | 'coral' | 'maze'
+export type PresetId =
+  | 'mixed'
+  | 'spots'
+  | 'worms'
+  | 'coral'
+  | 'maze'
+  | 'order-disorder'
 export type RecipePreset = PresetId | 'custom'
 
 export interface PatternPreset {
@@ -90,6 +96,21 @@ export const PRESETS: readonly PatternPreset[] = [
       F2: 0.04,
       K1: 0.062,
       K2: 0.062,
+      Du1: 0.72,
+      Du2: 0.72,
+      Dv1: 0.25,
+      Dv2: 0.25,
+    },
+  },
+  {
+    id: 'order-disorder',
+    name: 'Order–disorder transition',
+    description: 'The opposing reaction gradients featured in the project image shift from ordered structure into disorder.',
+    controls: {
+      F1: 0.067,
+      F2: 0.043,
+      K1: 0.059,
+      K2: 0.076,
       Du1: 0.72,
       Du2: 0.72,
       Dv1: 0.25,
