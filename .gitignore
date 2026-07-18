@@ -3,5 +3,4 @@
 *.xlsx
 *.pyc
 .env
-TODO*.md
 .pytest_cache/
