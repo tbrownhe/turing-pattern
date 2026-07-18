@@ -1,5 +1,6 @@
 uvicorn[standard]
 fastapi
+pydantic>=2.7,<3
 numpy
 scipy
 pillow

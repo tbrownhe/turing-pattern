@@ -7,21 +7,36 @@ from scipy.interpolate import interp1d
 from scipy.ndimage import zoom
 
 
+class SimulationError(RuntimeError):
+    """Raised when a simulation leaves the finite numerical domain."""
+
+
 class TuringSimulator:
-    def __init__(self, shape=(256, 256), **initial_params):
+    def __init__(self, controls, shape=(256, 256), seed: int = 0):
+        if (
+            not isinstance(shape, tuple)
+            or len(shape) != 2
+            or any(not isinstance(value, int) or value <= 0 for value in shape)
+        ):
+            raise ValueError("shape must contain two positive integers")
         self.shape = shape
         self.rgb = False
-        self.reset()
-        self.update_controls(initial_params)
+        self.rng = np.random.default_rng(seed)
+        self.reset(seed)
+        self.update_controls(controls)
 
-    def reset(self):
+    def reset(self, seed: int | None = None):
+        if seed is not None:
+            self.rng = np.random.default_rng(seed)
         self.U = np.ones(self.shape)
         self.V = np.zeros(self.shape)
-        self.seed()
+        self.perturb(noise=1.0)
 
-    def seed(self, noise: float = 1.0):
-        self.U += noise * (np.random.rand(*self.shape) - 0.5)
-        self.V += noise * (np.random.rand(*self.shape) - 0.5)
+    def perturb(self, noise: float = 0.25):
+        if not 0 < noise <= 1:
+            raise ValueError("noise must be greater than zero and no more than one")
+        self.U += noise * (self.rng.random(self.shape) - 0.5)
+        self.V += noise * (self.rng.random(self.shape) - 0.5)
 
     def update_controls(self, params):
         self.F = np.linspace(params["F1"], params["F2"], self.shape[1])[None, :].repeat(
@@ -43,12 +58,18 @@ class TuringSimulator:
         self.U += self.Du * Lu - reaction + self.F * (1 - self.U)
         self.V += self.Dv * Lv + reaction - (self.F + self.k) * self.V
 
-        # Check for invalid sim results.
-        if np.isnan(self.U).any() or np.isnan(self.V).any():
-            self.reset()
+        if not np.isfinite(self.U).all() or not np.isfinite(self.V).all():
+            raise SimulationError("simulation produced non-finite concentrations")
 
-    def img_norm(self, Z):
-        return (255 * (Z - Z.min()) / (Z.max() - Z.min())).astype(np.uint8)
+    @staticmethod
+    def img_norm(Z):
+        if not np.isfinite(Z).all():
+            raise SimulationError("cannot normalize non-finite concentrations")
+        minimum = Z.min()
+        value_range = Z.max() - minimum
+        if value_range <= np.finfo(Z.dtype).eps:
+            return np.zeros_like(Z, dtype=np.uint8)
+        return (255 * (Z - minimum) / value_range).astype(np.uint8)
 
     def step(self, steps: int = 1):
         for _ in range(steps):

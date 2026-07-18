@@ -1,20 +1,47 @@
 services:
-
   backend:
-    image: 'backend:${TAG:-latest}'
-    restart: always
+    image: 'turing-backend:${TAG:-latest}'
+    restart: unless-stopped
     build:
       context: ./backend
+    environment:
+      TURING_ALLOWED_ORIGINS: http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173
+      TURING_ENABLE_DOCS: "true"
+      TURING_MAX_COMPUTE_JOBS: ${TURING_MAX_COMPUTE_JOBS:-2}
+      TURING_MAX_COMPUTE_WAITERS: ${TURING_MAX_COMPUTE_WAITERS:-2}
+      TURING_COMPUTE_WORKERS: ${TURING_COMPUTE_WORKERS:-2}
     ports:
-      - "8000:8000"   # Expose FastAPI backend at http://localhost:8000
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+    cpus: ${BACKEND_CPU_LIMIT:-4.0}
+    mem_limit: ${BACKEND_MEMORY_LIMIT:-2g}
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
 
   frontend:
-    image: nginx:alpine
-    restart: always
+    image: 'turing-frontend:${TAG:-latest}'
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
     build:
       context: ./frontend
-      args:
-        - VITE_API_URL=http://localhost:8000
     ports:
-      - "3000:80"     # Expose frontend at http://localhost:3000
-    
+      - "127.0.0.1:3000:80"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    cpus: ${FRONTEND_CPU_LIMIT:-0.5}
+    mem_limit: ${FRONTEND_MEMORY_LIMIT:-256m}
+    pids_limit: 64
+    security_opt:
+      - no-new-privileges:true

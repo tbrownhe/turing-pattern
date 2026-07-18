@@ -1,0 +1,127 @@
+from dataclasses import replace
+
+import pytest
+from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
+
+from app.api.main import create_app
+from app.config import settings
+
+
+CONTROLS = {
+    "F1": 0.04,
+    "F2": 0.08,
+    "K1": 0.056,
+    "K2": 0.074,
+    "Du1": 0.7,
+    "Du2": 0.7,
+    "Dv1": 0.25,
+    "Dv2": 0.25,
+}
+ORIGIN = "http://testserver"
+
+
+@pytest.fixture
+def client():
+    config = replace(
+        settings,
+        allowed_origins=(ORIGIN,),
+        preview_size=8,
+        render_size=8,
+        render_steps=2,
+        render_upsample=1,
+        steps_per_frame=1,
+        frame_rate=5,
+        max_compute_jobs=1,
+        compute_workers=1,
+        max_compute_waiters=0,
+    )
+    with TestClient(create_app(config)) as test_client:
+        yield test_client
+
+
+def test_health_does_not_consume_compute_capacity(client):
+    assert client.get("/healthz").json() == {"status": "ok"}
+    readiness = client.get("/readyz").json()
+    assert readiness["active_compute_jobs"] == 0
+    assert readiness["compute_capacity"] == 1
+
+
+def test_websocket_rejects_an_unapproved_browser_origin(client):
+    with pytest.raises(WebSocketDisconnect) as caught:
+        with client.websocket_connect("/ws", headers={"origin": "https://evil.invalid"}):
+            pass
+
+    assert caught.value.code == 1008
+    assert client.get("/readyz").json()["active_compute_jobs"] == 0
+
+
+def test_websocket_rejects_constructor_options(client):
+    with client.websocket_connect("/ws", headers={"origin": ORIGIN}) as websocket:
+        websocket.send_json(
+            {
+                "type": "start",
+                "protocol_version": 1,
+                "controls": CONTROLS,
+                "shape": [50_000, 50_000],
+            }
+        )
+        response = websocket.receive_json()
+
+    assert response["type"] == "error"
+    assert response["error"]["code"] == "invalid_message"
+    assert client.get("/readyz").json()["active_compute_jobs"] == 0
+
+
+def test_websocket_starts_and_produces_a_png_frame(client):
+    with client.websocket_connect("/ws", headers={"origin": ORIGIN}) as websocket:
+        websocket.send_json(
+            {
+                "type": "start",
+                "protocol_version": 1,
+                "controls": CONTROLS,
+                "seed": 7,
+            }
+        )
+        ready = websocket.receive_json()
+        frame = websocket.receive_bytes()
+        websocket.send_json({"type": "pause"})
+
+    assert ready["type"] == "ready"
+    assert ready["preview_size"] == 8
+    assert frame.startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_websocket_rejects_excess_sessions_without_queueing(client):
+    start = {
+        "type": "start",
+        "protocol_version": 1,
+        "controls": CONTROLS,
+        "seed": 7,
+    }
+    with client.websocket_connect("/ws", headers={"origin": ORIGIN}) as first:
+        first.send_json(start)
+        assert first.receive_json()["type"] == "ready"
+
+        with client.websocket_connect("/ws", headers={"origin": ORIGIN}) as second:
+            response = second.receive_json()
+
+    assert response["error"]["code"] == "server_busy"
+    assert client.get("/readyz").json()["active_compute_jobs"] == 0
+
+
+def test_generate_is_post_only_and_validated(client):
+    assert client.get("/api/v1/generate").status_code == 405
+    invalid = client.post(
+        "/api/v1/generate",
+        json={"controls": {**CONTROLS, "F1": "not-a-number"}},
+    )
+    assert invalid.status_code == 422
+
+    response = client.post(
+        "/api/v1/generate", json={"controls": CONTROLS, "seed": 9}
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.headers["cache-control"] == "no-store"
+    assert response.content.startswith(b"\x89PNG\r\n\x1a\n")

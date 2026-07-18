@@ -1,33 +1,64 @@
 services:
   backend:
-    image: 'backend:${TAG:-latest}'
-    restart: always
+    image: '${STACK_NAME?Variable not set}-backend:${TAG:-latest}'
+    restart: unless-stopped
     build:
       context: ./backend
+    environment:
+      TURING_ALLOWED_ORIGINS: https://${DOMAIN?Variable not set}
+      TURING_ALLOW_ORIGINLESS_WEBSOCKETS: "true"
+      TURING_ENABLE_DOCS: "false"
+      TURING_MAX_COMPUTE_JOBS: ${TURING_MAX_COMPUTE_JOBS:-2}
+      TURING_MAX_COMPUTE_WAITERS: ${TURING_MAX_COMPUTE_WAITERS:-2}
+      TURING_COMPUTE_WORKERS: ${TURING_COMPUTE_WORKERS:-2}
+      TURING_ADMISSION_TIMEOUT_SECONDS: ${TURING_ADMISSION_TIMEOUT_SECONDS:-0.25}
+      TURING_IDLE_TIMEOUT_SECONDS: ${TURING_IDLE_TIMEOUT_SECONDS:-600}
+      TURING_FRAME_RATE: ${TURING_FRAME_RATE:-10}
+      TURING_STEPS_PER_FRAME: ${TURING_STEPS_PER_FRAME:-25}
     networks:
-      - traefik-public
-    labels:
-      - traefik.enable=true
-      - traefik.constraint-label=traefik-public
-
-      - traefik.http.services.${STACK_NAME?Variable not set}-backend-https.loadbalancer.server.port=8000
-
-      - traefik.http.routers.${STACK_NAME?Variable not set}-backend-https.rule=Host(`api.${DOMAIN}`)
-      - traefik.http.routers.${STACK_NAME?Variable not set}-backend-https.entrypoints=https
-      - traefik.http.routers.${STACK_NAME?Variable not set}-backend-https.tls.certresolver=le
-      - traefik.http.routers.${STACK_NAME?Variable not set}-backend-https.middlewares=rate-limit
-
+      - default
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2)"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+    cpus: ${BACKEND_CPU_LIMIT:-4.0}
+    mem_limit: ${BACKEND_MEMORY_LIMIT:-2g}
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   frontend:
-    image: nginx:alpine
-    restart: always
+    image: '${STACK_NAME?Variable not set}-frontend:${TAG:-latest}'
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
     networks:
       - traefik-public
       - default
     build:
       context: ./frontend
-      args:
-        - VITE_API_URL=https://api.${DOMAIN}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    cpus: ${FRONTEND_CPU_LIMIT:-0.5}
+    mem_limit: ${FRONTEND_MEMORY_LIMIT:-256m}
+    pids_limit: 64
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
     labels:
       - traefik.enable=true
       - traefik.docker.network=traefik-public
@@ -35,15 +66,22 @@ services:
 
       - traefik.http.services.${STACK_NAME?Variable not set}-frontend.loadbalancer.server.port=80
 
-      - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-http.rule=Host(`${DOMAIN}`)
-      - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-http.entrypoints=http
-      - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-http.middlewares=https-redirect
+      - traefik.http.middlewares.${STACK_NAME?Variable not set}-https-redirect.redirectscheme.scheme=https
+      - traefik.http.middlewares.${STACK_NAME?Variable not set}-https-redirect.redirectscheme.permanent=true
+      - traefik.http.middlewares.${STACK_NAME?Variable not set}-rate-limit.ratelimit.average=20
+      - traefik.http.middlewares.${STACK_NAME?Variable not set}-rate-limit.ratelimit.period=1s
+      - traefik.http.middlewares.${STACK_NAME?Variable not set}-rate-limit.ratelimit.burst=40
+      - traefik.http.middlewares.${STACK_NAME?Variable not set}-inflight.inflightreq.amount=50
 
-      - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-https.rule=Host(`${DOMAIN}`)
+      - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-http.rule=Host(`${DOMAIN?Variable not set}`)
+      - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-http.entrypoints=http
+      - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-http.middlewares=${STACK_NAME?Variable not set}-https-redirect@docker
+
+      - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-https.rule=Host(`${DOMAIN?Variable not set}`)
       - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-https.entrypoints=https
       - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-https.tls=true
       - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-https.tls.certresolver=le
-      - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-https.middlewares=rate-limit
+      - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-https.middlewares=${STACK_NAME?Variable not set}-rate-limit@docker,${STACK_NAME?Variable not set}-inflight@docker
 
 networks:
   traefik-public:

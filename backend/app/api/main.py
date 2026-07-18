@@ -1,124 +1,356 @@
+from __future__ import annotations
+
 import asyncio
-import time
+import logging
+from contextlib import asynccontextmanager, suppress
 from io import BytesIO
+from time import monotonic
+from uuid import uuid4
 
-from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, Response, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
-from PIL import Image
+from pydantic import ValidationError
+from PIL import Image, PngImagePlugin
+from starlette.websockets import WebSocketDisconnect
 
-from app.core.turing import TuringSimulator, turing_pattern
-
-# Prevent overload and abuse
-MAX_SIMS = 4
-MAX_IDLE = 600
-sim_semaphore = asyncio.Semaphore(MAX_SIMS)
-
-app = FastAPI()
-
-# Allow CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+from app.api.schemas import (
+    ControlsMessage,
+    PauseMessage,
+    PerturbMessage,
+    RenderRequest,
+    ResetMessage,
+    ResumeMessage,
+    StartMessage,
+    parse_client_message,
 )
+from app.config import Settings, settings
+from app.core.turing import SimulationError, TuringSimulator
+from app.runtime import ComputeRuntime
 
 
-@app.get("/generate")
-def generate(
-    F1: float = Query(...),
-    F2: float = Query(...),
-    K1: float = Query(...),
-    K2: float = Query(...),
-    Du1: float = Query(...),
-    Du2: float = Query(...),
-    Dv1: float = Query(...),
-    Dv2: float = Query(...),
-):
-    pattern = turing_pattern(
-        w=256,
-        h=256,
-        F_ctrl=[0, 1],
-        F_vals=[F1, F2],
-        F_axis="x",
-        k_ctrl=[0, 1],
-        k_vals=[K1, K2],
-        k_axis="x",
-        Du_ctrl=[0, 1],
-        Du_vals=[Du1, Du2],
-        Du_axis="y",
-        Dv_ctrl=[0, 1],
-        Dv_vals=[Dv1, Dv2],
-        Dv_axis="y",
-        steps=5000,
-        upsample=2,
+logger = logging.getLogger(__name__)
+
+
+class ClientProtocolError(ValueError):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+def _encode_preview(simulator: TuringSimulator, steps: int) -> bytes:
+    frame = simulator.step(steps=steps)
+    output = BytesIO()
+    Image.fromarray(frame).save(output, format="PNG", optimize=False)
+    return output.getvalue()
+
+
+def _render_png(payload: RenderRequest, config: Settings) -> bytes:
+    simulator = TuringSimulator(
+        payload.controls.model_dump(),
+        shape=(config.render_size, config.render_size),
+        seed=payload.seed,
     )
-    img = Image.fromarray(pattern).convert("L")
-    buf = BytesIO()
-    img.save(buf, format="PNG")
-    buf.seek(0)
-    return StreamingResponse(buf, media_type="image/png")
+    frame = simulator.step(steps=config.render_steps)
+    image = Image.fromarray(frame).convert("L")
+    if config.render_upsample != 1:
+        output_size = config.render_size * config.render_upsample
+        image = image.resize((output_size, output_size), Image.Resampling.BICUBIC)
+
+    metadata = PngImagePlugin.PngInfo()
+    metadata.add_text(
+        "TuringParams",
+        payload.model_dump_json(indent=2),
+    )
+    output = BytesIO()
+    image.save(output, format="PNG", pnginfo=metadata)
+    return output.getvalue()
 
 
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+async def _receive_message(websocket: WebSocket, config: Settings):
     try:
-        await asyncio.wait_for(sim_semaphore.acquire(), timeout=0.5)
-    except asyncio.TimeoutError:
-        await websocket.accept()
-        await websocket.send_json(
-            {
-                "error": f"Server busy. Maximum of {MAX_SIMS} simulations has been reached."
-            }
+        raw = await websocket.receive_text()
+    except WebSocketDisconnect:
+        raise
+    except RuntimeError as error:
+        raise ClientProtocolError(
+            "text_message_required", "Client messages must be JSON text."
+        ) from error
+
+    if len(raw.encode("utf-8")) > config.max_websocket_message_bytes:
+        raise ClientProtocolError(
+            "message_too_large",
+            f"Messages may not exceed {config.max_websocket_message_bytes} bytes.",
         )
-        await websocket.close()
-        return
-
-    await websocket.accept()
-    last_time = time.time()
 
     try:
-        # Get initial slider positions and kick off sim class
-        msg = await websocket.receive_json()
-        sim = TuringSimulator(**msg)
+        return parse_client_message(raw)
+    except ValidationError as error:
+        raise ClientProtocolError(
+            "invalid_message", "Message does not match protocol version 1."
+        ) from error
 
-        # Create async task for updating control maps
-        async def receive_controls():
-            nonlocal last_time
-            while True:
-                msg = await websocket.receive_json()
-                if msg.get("type") == "seed":
-                    sim.seed()
-                else:
-                    sim.update_controls(msg)
 
-                # Reset timer if user provides input
-                last_time = time.time()
+async def _send_error_and_close(
+    websocket: WebSocket, error_code: str, message: str, close_code: int
+) -> None:
+    with suppress(RuntimeError, WebSocketDisconnect):
+        await websocket.send_json(
+            {"type": "error", "error": {"code": error_code, "message": message}}
+        )
+    with suppress(RuntimeError, WebSocketDisconnect):
+        await websocket.close(code=close_code, reason=message[:120])
 
-        receiver = asyncio.create_task(receive_controls())
 
-        # Serve simulation to websocket
+def _origin_is_allowed(websocket: WebSocket, config: Settings) -> bool:
+    origin = websocket.headers.get("origin")
+    if origin is None:
+        return config.allow_originless_websockets
+    return origin.rstrip("/") in config.allowed_origins
+
+
+def create_app(config: Settings = settings) -> FastAPI:
+    @asynccontextmanager
+    async def lifespan(application: FastAPI):
+        runtime = ComputeRuntime(config)
+        application.state.runtime = runtime
         try:
-            while True:
-                # Kill sessions that have been running without input for >5min
-                if time.time() - last_time > MAX_IDLE:
-                    await websocket.send_json(
-                        {"error": f"Session timed out after {MAX_IDLE} seconds."}
-                    )
-                    await websocket.close()
-                    break
-
-                frame = sim.step(steps=25)
-                buf = BytesIO()
-                Image.fromarray(frame).save(buf, format="PNG")
-                buf.seek(0)
-                await websocket.send_bytes(buf.read())
-                await asyncio.sleep(0.05)
-        except WebSocketDisconnect:
-            pass
+            yield
         finally:
-            receiver.cancel()
-    finally:
-        sim_semaphore.release()
+            runtime.close()
+
+    application = FastAPI(
+        title="Turing Pattern API",
+        version="1.0.0",
+        docs_url="/docs" if config.docs_enabled else None,
+        redoc_url="/redoc" if config.docs_enabled else None,
+        openapi_url="/openapi.json" if config.docs_enabled else None,
+        lifespan=lifespan,
+    )
+    application.state.settings = config
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(config.allowed_origins),
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Content-Type"],
+    )
+
+    @application.get("/healthz", include_in_schema=False)
+    async def health() -> dict[str, str]:
+        return {"status": "ok"}
+
+    @application.get("/readyz", include_in_schema=False)
+    async def readiness(request: Request) -> dict[str, int | str]:
+        runtime: ComputeRuntime = request.app.state.runtime
+        return {
+            "status": "ready",
+            "active_compute_jobs": runtime.gate.active,
+            "waiting_compute_jobs": runtime.gate.waiting,
+            "compute_capacity": runtime.gate.capacity,
+        }
+
+    @application.post("/api/v1/generate", response_class=Response)
+    async def generate(payload: RenderRequest, request: Request) -> Response:
+        runtime: ComputeRuntime = request.app.state.runtime
+        request_id = uuid4().hex
+        if not await runtime.gate.acquire():
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "server_busy",
+                    "message": "Render capacity is currently full. Please retry shortly.",
+                },
+                headers={"Retry-After": "2", "X-Request-ID": request_id},
+            )
+
+        logger.info("render_started request_id=%s", request_id)
+        started = monotonic()
+        try:
+            content = await runtime.run(_render_png, payload, config)
+        except SimulationError as error:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "simulation_failed", "message": str(error)},
+                headers={"X-Request-ID": request_id},
+            ) from error
+        finally:
+            runtime.gate.release()
+
+        logger.info(
+            "render_completed request_id=%s duration_seconds=%.3f bytes=%d",
+            request_id,
+            monotonic() - started,
+            len(content),
+        )
+        return Response(
+            content=content,
+            media_type="image/png",
+            headers={
+                "Cache-Control": "no-store",
+                "Content-Disposition": 'attachment; filename="turing-pattern.png"',
+                "X-Request-ID": request_id,
+            },
+        )
+
+    @application.websocket("/ws")
+    async def websocket_endpoint(websocket: WebSocket) -> None:
+        runtime: ComputeRuntime = websocket.app.state.runtime
+        session_id = uuid4().hex
+        accepted = False
+        tasks: set[asyncio.Task[None]] = set()
+
+        if not _origin_is_allowed(websocket, config):
+            await websocket.close(code=1008, reason="WebSocket origin is not allowed.")
+            return
+
+        if not await runtime.gate.acquire():
+            await websocket.accept()
+            await _send_error_and_close(
+                websocket,
+                "server_busy",
+                "All simulation slots are busy. Please retry shortly.",
+                1013,
+            )
+            return
+
+        logger.info("websocket_started session_id=%s", session_id)
+        started = monotonic()
+        try:
+            await websocket.accept()
+            accepted = True
+            try:
+                initial = await asyncio.wait_for(
+                    _receive_message(websocket, config),
+                    timeout=config.initial_message_timeout_seconds,
+                )
+            except TimeoutError as error:
+                raise ClientProtocolError(
+                    "initial_message_timeout",
+                    "The simulation start message was not received in time.",
+                ) from error
+
+            if not isinstance(initial, StartMessage):
+                raise ClientProtocolError(
+                    "start_required", "The first message must have type 'start'."
+                )
+
+            simulator = await runtime.run(
+                TuringSimulator,
+                initial.controls.model_dump(),
+                (config.preview_size, config.preview_size),
+                initial.seed,
+            )
+            simulation_lock = asyncio.Lock()
+            running = asyncio.Event()
+            running.set()
+            last_activity = monotonic()
+
+            await websocket.send_json(
+                {
+                    "type": "ready",
+                    "protocol_version": 1,
+                    "session_id": session_id,
+                    "preview_size": config.preview_size,
+                    "frame_rate": config.frame_rate,
+                }
+            )
+
+            async def receive_controls() -> None:
+                nonlocal last_activity
+                while True:
+                    message = await _receive_message(websocket, config)
+                    last_activity = monotonic()
+                    if isinstance(message, StartMessage):
+                        raise ClientProtocolError(
+                            "already_started", "A session can only be started once."
+                        )
+                    if isinstance(message, PauseMessage):
+                        running.clear()
+                        continue
+                    if isinstance(message, ResumeMessage):
+                        running.set()
+                        continue
+
+                    async with simulation_lock:
+                        if isinstance(message, ControlsMessage):
+                            await runtime.run(
+                                simulator.update_controls,
+                                message.controls.model_dump(),
+                            )
+                        elif isinstance(message, ResetMessage):
+                            await runtime.run(simulator.reset, message.seed)
+                        elif isinstance(message, PerturbMessage):
+                            await runtime.run(simulator.perturb, message.noise)
+
+            async def send_frames() -> None:
+                frame_interval = 1.0 / config.frame_rate
+                while True:
+                    if monotonic() - last_activity > config.idle_timeout_seconds:
+                        await _send_error_and_close(
+                            websocket,
+                            "idle_timeout",
+                            "Session timed out after "
+                            f"{config.idle_timeout_seconds:g} seconds without input.",
+                            1000,
+                        )
+                        return
+                    if not running.is_set():
+                        await asyncio.sleep(min(frame_interval, 0.1))
+                        continue
+
+                    frame_started = monotonic()
+                    async with simulation_lock:
+                        frame = await runtime.run(
+                            _encode_preview, simulator, config.steps_per_frame
+                        )
+                    await websocket.send_bytes(frame)
+                    delay = frame_interval - (monotonic() - frame_started)
+                    if delay > 0:
+                        await asyncio.sleep(delay)
+
+            tasks = {
+                asyncio.create_task(receive_controls(), name=f"receive-{session_id}"),
+                asyncio.create_task(send_frames(), name=f"frames-{session_id}"),
+            }
+            done, pending = await asyncio.wait(
+                tasks, return_when=asyncio.FIRST_COMPLETED
+            )
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            for task in done:
+                task.result()
+        except (WebSocketDisconnect, asyncio.CancelledError):
+            pass
+        except ClientProtocolError as error:
+            if accepted:
+                await _send_error_and_close(
+                    websocket, error.code, error.message, close_code=1008
+                )
+        except Exception:
+            logger.exception("websocket_failed session_id=%s", session_id)
+            if accepted:
+                await _send_error_and_close(
+                    websocket,
+                    "internal_error",
+                    "The simulation stopped unexpectedly.",
+                    close_code=1011,
+                )
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            runtime.gate.release()
+            logger.info(
+                "websocket_finished session_id=%s duration_seconds=%.3f",
+                session_id,
+                monotonic() - started,
+            )
+
+    return application
+
+
+app = create_app()

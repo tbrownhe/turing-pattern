@@ -1,71 +1,172 @@
-# Grey-Scott Turing Pattern Generator
+# Gray-Scott Turing Pattern Lab
 
-This project generates customizable Turing patterns using the Gray-Scott reaction-diffusion model. It was created as part of a personal exploration into the themes of emergence and imperfection, culminating in a tattoo design that blends order and chaos through mathematically generated textures.
+An interactive reaction-diffusion playground for discovering organic textures and
+exporting reproducible patterns. This began as a local Python script for tattoo
+ideas; one of its patterns now lives on the author's arm. The current project turns
+that experiment into a deliberately small, self-hosted web application.
 
-### Grayscale output of this script 
 ![Turing pattern](static/turing.png)
 
-### After thresholding in GIMP
-![Turing pattern](static/turing_mono.png)
+## What works today
 
-## Getting Started
-- Clone the repo: `git clone git@github.com:tbrownhe/turing-pattern.git`
-- Install dependencies: `conda install -f dev_environment.yml`
-- Activate the environment: `conda activate turing`
-- Run the script: `python src/turing.py`
-- Images are saved as `images/turing_pattern_{timestamp}.png`
+- A live 256×256 simulation with horizontal feed/kill gradients and vertical
+  diffusion gradients.
+- Pause, deterministic reset, perturb, reconnect, and leak-free canvas rendering.
+- A bounded PNG endpoint at `POST /api/v1/generate` for the current fixed-size
+  export. The full queued high-resolution workflow is still on the roadmap.
+- Strict versioned inputs, WebSocket origin checks, a shared compute limit, and
+  CPU work isolated from FastAPI's event loop.
+- Same-origin production routing: Traefik exposes Nginx, and Nginx proxies `/api`
+  and `/ws` to a private backend container.
 
-Each PNG embeds the parameter dictionary used to generate it in its metadata (TuringParams field), so you can easily figure out how to regenerate it. Open the file in Notepad++ or similar to see the metadata at the top.
+See [TODO.md](TODO.md) for the measured-performance, high-resolution, and eventual
+browser-side simulation roadmap. The WASM/WebGL exploration has intentionally not
+started yet; it will be treated as a learning-oriented prototype rather than a
+silent rewrite.
 
-## Theory and Background
-The Gray-Scott model simulates how two chemical components, U and V, react and diffuse through space over time. This reaction-diffusion system leads to a rich variety of self-organized structures like spots, stripes, and mazes.
+## Run locally with Docker
 
-The core equations are:
+```console
+docker compose -f docker-compose.local.yml up --build
+```
 
-- `∂U/∂t = Du * ∇²U - UV² + F(1 - U)`
-- `∂V/∂t = Dv * ∇²V + UV² - (F + k)V`
+Open <http://localhost:3000>. The backend is also bound to
+<http://127.0.0.1:8000> for local API inspection, and its docs are available at
+<http://127.0.0.1:8000/docs>. Both published ports bind only to loopback.
 
-Where:
+## Develop without rebuilding containers
 
-`Du`, `Dv`: Diffusion rates for components U and V
+Backend, from the repository root:
 
-`F`: Feed rate of U
+```console
+cd backend
+uv run --with-requirements requirements-dev.txt uvicorn app.api.main:app --reload
+```
 
-`k`: Kill rate (removal) of V
+Frontend, in another terminal:
 
-`UV²`: Reaction term producing more V
+```console
+cd frontend
+npm ci
+npm run dev
+```
 
-In the general Turing two-species diffusion model, patterns emerge when the system is destabilized by diffusion, specifically when the inhibitor (V) diffuses faster than the activator (U). In the Grey-Scott case, patterns can emerge even though often `Du > Dv` due to the kinetics of autocatalysis reactions. `UV²` converts U into V. `F(1−U)` replenishes U. `(F+k)V` removes V.
+Vite proxies `/api` and `/ws` to the local backend, so the browser still uses a
+single origin at <http://localhost:5173>.
 
-## Image Generation Parameters
+Run the checks:
 
-All generation parameters are defined in `turing_parameters.json` and support interpolation across either axis. Each parameter can vary smoothly across the image by providing control points and corresponding values.
+```console
+cd backend
+uv run --with-requirements requirements-dev.txt python -m pytest tests -q
 
-| Parameter   | Description                                   | Default Axis | Example             |
-|-------------|-----------------------------------------------|---------------|----------------------|
-| `w`, `h`    | Width and height of the image grid (pixels)   | –             | 512x128              |
-| `Du`        | Diffusion rate of U                           | `y`           | `[0.7, 0.7]`         |
-| `Dv`        | Diffusion rate of V                           | `y`           | `[0.25, 0.25]`       |
-| `F`         | Feed rate (adds U)                            | `x`           | `[0.04, 0.08]`       |
-| `k`         | Kill rate (removes V)                         | `x`           | `[0.056, ..., 0.074]`|
-| `steps`     | Number of simulation iterations               | –             | 10,000+              |
-| `upsample`  | Output scale factor (uses bicubic zoom)       | –             | 2                    |
+cd ../frontend
+npm test
+npm run lint
+npm run build
+```
 
-The Du, Dv, F, and k parameters include:
-- `*_ctrl`: Control point positions (fractions from 0.0 to 1.0)
-- `*_vals`: Parameter values at those control points
-- `*_axis`: Axis along which the parameter varies (x or y)
+## Public protocol
 
-## Output
+The browser opens `/ws` and first sends protocol version 1:
 
-The returned image is an 8-bit grayscale PNG.
-Metadata is embedded in the file (TuringParams) as a JSON string.
-Upsampling improves aesthetics for print or illustration.
+```json
+{
+  "type": "start",
+  "protocol_version": 1,
+  "seed": 0,
+  "controls": {
+    "F1": 0.04,
+    "F2": 0.08,
+    "K1": 0.056,
+    "K2": 0.074,
+    "Du1": 0.7,
+    "Du2": 0.7,
+    "Dv1": 0.25,
+    "Dv2": 0.25
+  }
+}
+```
+
+Subsequent message types are `controls`, `pause`, `resume`, `reset`, and `perturb`.
+Unknown fields, non-finite values, and values outside the documented schema are
+rejected. Clients cannot choose simulation allocation size.
+
+The fixed-size PNG endpoint accepts the same controls and a seed:
+
+```console
+curl -X POST http://127.0.0.1:8000/api/v1/generate \
+  -H "Content-Type: application/json" \
+  -d '{"seed":7,"controls":{"F1":0.04,"F2":0.08,"K1":0.056,"K2":0.074,"Du1":0.7,"Du2":0.7,"Dv1":0.25,"Dv2":0.25}}' \
+  --output pattern.png
+```
+
+PNG exports contain the recipe in the `TuringParams` text field.
+
+## Capacity and security model
+
+One Uvicorn process owns one in-memory admission controller. Live sessions and PNG
+requests share its slots, and all NumPy/Pillow work runs in a dedicated bounded
+executor. Do not add Uvicorn workers: each process would create another independent
+limit. A future durable render service will own multi-process high-resolution work.
+
+The production defaults admit two compute jobs and two short-lived waiters. Excess
+work is rejected with HTTP `503` or WebSocket close code `1013`. Traefik adds request
+and in-flight limits, while Nginx adds request-size limits and security headers.
+Application validation remains necessary because edge limits do not govern work
+performed after a WebSocket handshake.
+
+Copy `.env.example` to `.env` and set at least `STACK_NAME` and `DOMAIN`. Important
+tuning variables are:
+
+| Variable | Default | Purpose |
+| --- | ---: | --- |
+| `TURING_MAX_COMPUTE_JOBS` | `2` | Total admitted live sessions and renders |
+| `TURING_MAX_COMPUTE_WAITERS` | `2` | Maximum short admission waiting room |
+| `TURING_COMPUTE_WORKERS` | `2` | Dedicated CPU worker threads; must not exceed jobs |
+| `TURING_ADMISSION_TIMEOUT_SECONDS` | `0.25` | How quickly excess work is rejected |
+| `TURING_IDLE_TIMEOUT_SECONDS` | `600` | Live session inactivity limit |
+| `TURING_FRAME_RATE` | `10` | Maximum server preview frames per second |
+| `TURING_STEPS_PER_FRAME` | `25` | Numerical iterations between preview frames |
+| `BACKEND_CPU_LIMIT` | `4.0` | Backend container CPU ceiling |
+| `BACKEND_MEMORY_LIMIT` | `2g` | Backend container memory ceiling |
+
+Production API docs are disabled. Browser WebSocket origins must exactly match the
+configured public origin; originless non-browser clients are allowed by default but
+remain subject to the same protocol and compute limits.
+
+## Model
+
+The Gray-Scott model simulates two concentrations, `U` and `V`:
+
+- `∂U/∂t = Du ∇²U - UV² + F(1 - U)`
+- `∂V/∂t = Dv ∇²V + UV² - (F + k)V`
+
+`Du` and `Dv` are diffusion rates, `F` replenishes `U`, and `k` removes `V`.
+Autocatalysis through `UV²` produces spots, stripes, worms, and maze-like structures.
+The current discrete Laplacian uses periodic boundaries. Endpoint controls are
+linearly interpolated across the image.
+
+The original batch configuration remains in
+`backend/app/core/turing_parameters.json`; its standalone entry point still needs
+the path cleanup described in P1.
+
+## Deployment
+
+Production expects an existing Docker network named `traefik-public` and Traefik
+entrypoints named `http` and `https`, plus a certificate resolver named `le`.
+
+```console
+cp .env.example .env
+# edit DOMAIN and STACK_NAME
+docker compose config
+docker compose up -d --build
+```
+
+Only the frontend joins `traefik-public`. The backend is reachable from Nginx on the
+private Compose network and has health checks, CPU/memory/PID limits, bounded logs,
+and `no-new-privileges` enabled.
 
 ## License
 
-This project is licensed under the MIT License.
-
-## Author
-
-Created by @tbrownhe as a tribute to complexity, self-organization, and the mathematical beauty that often emerges from chaos.
+MIT. See [LICENSE](LICENSE).
