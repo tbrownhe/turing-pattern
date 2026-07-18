@@ -5,6 +5,8 @@ services:
     build:
       context: ./backend
     environment:
+      OPENBLAS_NUM_THREADS: ${OPENBLAS_NUM_THREADS:-1}
+      OMP_NUM_THREADS: ${OMP_NUM_THREADS:-1}
       TURING_ALLOWED_ORIGINS: https://${DOMAIN?Variable not set}
       TURING_ALLOW_ORIGINLESS_WEBSOCKETS: "true"
       TURING_ENABLE_DOCS: "false"

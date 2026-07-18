@@ -131,6 +131,8 @@ tuning variables are:
 | `TURING_FRAME_RATE` | `10` | Maximum server preview frames per second |
 | `TURING_STEPS_PER_FRAME` | `25` | Numerical iterations between preview frames |
 | `TURING_LOG_LEVEL` | `INFO` | Structured JSON log threshold |
+| `OPENBLAS_NUM_THREADS` | `1` | Native threads per compute worker |
+| `OMP_NUM_THREADS` | `1` | OpenMP threads per compute worker |
 | `BACKEND_CPU_LIMIT` | `4.0` | Backend container CPU ceiling |
 | `BACKEND_MEMORY_LIMIT` | `2g` | Backend container memory ceiling |
 

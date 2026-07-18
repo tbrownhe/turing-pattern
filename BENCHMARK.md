@@ -65,3 +65,25 @@ The hardened local container check admitted two live sessions, rejected the thir
 delivered 42 frames in two seconds, and returned to zero active/waiting work. Across
 15 concurrent health samples, mean latency was 12.5 ms and p95/max were 20.6 ms;
 the probe reported no errors. This validates bounded behavior, not OptiPlex sizing.
+
+## Production OptiPlex 5060 baseline
+
+Recorded on the production container host running Linux 6.8 with an Intel Core
+i5-8500T (six physical cores, one thread per core), Python 3.11.15, NumPy 2.4.6,
+and SciPy OpenBLAS. Grid and simulation state were 256 x 256 float32.
+
+| Measurement | Default native pool | One native thread |
+| --- | ---: | ---: |
+| 1,000-step time | 2.3988 s | 2.4015 s |
+| iterations/second | 416.87 | 416.40 |
+| process threads | 11 | 1 |
+| PNG encode | 6.73 ms | 6.75 ms |
+| process RSS | 64.8 MB | 65.0 MB |
+| selected convolution | 721.6 us | 720.7 us |
+| roll reference | 1,834.8 us | 1,876.1 us |
+
+The 0.11% throughput difference is noise, while removing ten unused native threads
+makes two-worker resource behavior much more predictable. Production therefore sets
+`OPENBLAS_NUM_THREADS=1` and `OMP_NUM_THREADS=1`. At 416 iterations/second, 25
+steps plus encoding take about 66.7 ms, so one session has headroom beneath the
+10 FPS cap. Two-session behavior still requires the deployed load test below.

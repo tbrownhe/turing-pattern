@@ -192,9 +192,10 @@ Done when:
 P1's server-side foundation is complete on the `overhaul` branch: the shared
 seeded engine, measured CPU optimization, numerical/API/UI tests, load tooling,
 CI gates, hash locks, non-root/read-only containers, structured logs, metrics, and
-operations notes are in place. The production OptiPlex/browser baseline and the
-WebGL/WASM prototype remain deliberately open in P1.2; concurrency stays at two
-until those measurements are recorded in `BENCHMARK.md`.
+operations notes are in place. The single-session production OptiPlex baseline is
+recorded. Its concurrent/browser measurements and the WebGL/WASM prototype remain
+deliberately open in P1.2; concurrency stays at two until those measurements are
+recorded in `BENCHMARK.md`.
 
 ### [x] P1.1 Separate the numerical engine from transport and files
 
@@ -224,9 +225,9 @@ Done when:
 
 ### [ ] P1.2 Benchmark before optimizing the engine
 
-CPU benchmark/refactor work is complete with before/after data in `BENCHMARK.md`.
-This stays open for the production OptiPlex/browser baseline and the intentionally
-deferred WebGL/WASM prototype.
+CPU benchmark/refactor work is complete with workstation and production OptiPlex
+data in `BENCHMARK.md`. This stays open for the deployed concurrent/browser baseline
+and the intentionally deferred WebGL/WASM prototype.
 
 - Add a benchmark script that records CPU model, NumPy backend/thread count, grid,
   dtype, iterations/second, frame-encoding time, frame bytes, peak RSS, and concurrent

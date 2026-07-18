@@ -155,14 +155,22 @@ async def disconnect_storm(ws_url: str, count: int, results: Results) -> None:
             results.errors.append(f"storm connection {seed}: {error}")
 
 
-async def render_probe(base_url: str, count: int, results: Results) -> None:
+async def render_probe(
+    base_url: str, count: int, delay: float, results: Results
+) -> None:
+    await asyncio.sleep(delay)
     payload = json.dumps({"controls": CONTROLS, "seed": 7}).encode()
     calls = [
         asyncio.to_thread(fetch, f"{base_url}/api/v1/generate", payload=payload)
         for _ in range(count)
     ]
     if calls:
-        results.render_statuses.extend(await asyncio.gather(*calls))
+        responses = await asyncio.gather(*calls, return_exceptions=True)
+        for response in responses:
+            if isinstance(response, BaseException):
+                results.errors.append(f"render failed: {response}")
+            else:
+                results.render_statuses.append(response)
 
 
 async def run(args: argparse.Namespace) -> Results:
@@ -174,7 +182,9 @@ async def run(args: argparse.Namespace) -> Results:
 
     tasks = [
         asyncio.create_task(health_probe(base_url, args.duration + 2, results)),
-        asyncio.create_task(render_probe(base_url, args.renders, results)),
+        asyncio.create_task(
+            render_probe(base_url, args.renders, args.render_delay, results)
+        ),
         *[
             asyncio.create_task(
                 exercise_session(
@@ -200,6 +210,12 @@ def main() -> None:
     parser.add_argument("--excess", type=int, default=1)
     parser.add_argument("--duration", type=float, default=10.0)
     parser.add_argument("--renders", type=int, default=2)
+    parser.add_argument(
+        "--render-delay",
+        type=float,
+        default=1.0,
+        help="Seconds to let live sessions acquire capacity before render probes.",
+    )
     parser.add_argument("--disconnect-storm", type=int, default=5)
     parser.add_argument(
         "--message-rate",
@@ -212,6 +228,8 @@ def main() -> None:
         parser.error("client counts must be non-negative and duration must be 1..300")
     if not 0 <= args.renders <= 20 or not 0 <= args.disconnect_storm <= 100:
         parser.error("renders must be 0..20 and disconnect-storm must be 0..100")
+    if not 0 <= args.render_delay <= args.duration:
+        parser.error("render-delay must be between zero and duration")
     if not 0 <= args.message_rate <= 100:
         parser.error("message-rate must be 0..100")
 
