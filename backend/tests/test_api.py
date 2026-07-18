@@ -1,12 +1,14 @@
+import json
 from dataclasses import replace
+from io import BytesIO
 
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 from starlette.websockets import WebSocketDisconnect
 
 from app.api.main import create_app
 from app.config import settings
-
 
 CONTROLS = {
     "F1": 0.04,
@@ -49,7 +51,9 @@ def test_health_does_not_consume_compute_capacity(client):
 
 def test_websocket_rejects_an_unapproved_browser_origin(client):
     with pytest.raises(WebSocketDisconnect) as caught:
-        with client.websocket_connect("/ws", headers={"origin": "https://evil.invalid"}):
+        with client.websocket_connect(
+            "/ws", headers={"origin": "https://evil.invalid"}
+        ):
             pass
 
     assert caught.value.code == 1008
@@ -118,10 +122,43 @@ def test_generate_is_post_only_and_validated(client):
     )
     assert invalid.status_code == 422
 
-    response = client.post(
-        "/api/v1/generate", json={"controls": CONTROLS, "seed": 9}
-    )
+    response = client.post("/api/v1/generate", json={"controls": CONTROLS, "seed": 9})
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
     assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-turing-engine"] == "2.0.0"
     assert response.content.startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_generate_is_reproducible_and_embeds_a_complete_recipe(client):
+    payload = {"controls": CONTROLS, "seed": 19}
+
+    first = client.post("/api/v1/generate", json=payload)
+    second = client.post("/api/v1/generate", json=payload)
+    image = Image.open(BytesIO(first.content))
+    recipe = json.loads(image.text["TuringParams"])
+
+    assert first.content == second.content
+    assert recipe == {
+        "engine_version": "2.0.0",
+        "boundary": "periodic",
+        "dtype": "float32",
+        "simulation_size": 8,
+        "steps": 2,
+        "upsample": 1,
+        "controls": CONTROLS,
+        "seed": 19,
+    }
+
+
+def test_metrics_report_work_without_high_cardinality_ids(client):
+    client.post("/api/v1/generate", json={"controls": CONTROLS, "seed": 2})
+
+    response = client.get("/metrics")
+
+    assert response.status_code == 200
+    assert "turing_renders_started_total 1" in response.text
+    assert "turing_renders_finished_total 1" in response.text
+    assert "turing_render_simulation_seconds_total " in response.text
+    assert "turing_process_resident_memory_bytes " in response.text
+    assert "request_id" not in response.text

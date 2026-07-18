@@ -40,7 +40,8 @@ Backend, from the repository root:
 
 ```console
 cd backend
-uv run --with-requirements requirements-dev.txt uvicorn app.api.main:app --reload
+uv run --with-requirements requirements-dev.lock \
+  python -m uvicorn app.api.main:app --reload
 ```
 
 Frontend, in another terminal:
@@ -57,14 +58,15 @@ single origin at <http://localhost:5173>.
 Run the checks:
 
 ```console
-cd backend
-uv run --with-requirements requirements-dev.txt python -m pytest tests -q
-
-cd ../frontend
-npm test
-npm run lint
-npm run build
+python scripts/check.py
 ```
+
+This uses the hash-locked Python dependency set and runs backend lint, formatting,
+type checking and tests plus frontend audit, tests, lint and build. See
+[BENCHMARK.md](BENCHMARK.md) for engine measurements and
+[docs/OPERATIONS.md](docs/OPERATIONS.md) for deployment, tuning and rollback.
+The first run also downloads Playwright's pinned Chromium build for the real-browser
+live-frame smoke test.
 
 ## Public protocol
 
@@ -128,6 +130,7 @@ tuning variables are:
 | `TURING_IDLE_TIMEOUT_SECONDS` | `600` | Live session inactivity limit |
 | `TURING_FRAME_RATE` | `10` | Maximum server preview frames per second |
 | `TURING_STEPS_PER_FRAME` | `25` | Numerical iterations between preview frames |
+| `TURING_LOG_LEVEL` | `INFO` | Structured JSON log threshold |
 | `BACKEND_CPU_LIMIT` | `4.0` | Backend container CPU ceiling |
 | `BACKEND_MEMORY_LIMIT` | `2g` | Backend container memory ceiling |
 
@@ -145,11 +148,13 @@ The Gray-Scott model simulates two concentrations, `U` and `V`:
 `Du` and `Dv` are diffusion rates, `F` replenishes `U`, and `k` removes `V`.
 Autocatalysis through `UV²` produces spots, stripes, worms, and maze-like structures.
 The current discrete Laplacian uses periodic boundaries. Endpoint controls are
-linearly interpolated across the image.
+linearly interpolated across the image. A reset recreates the exact seeded initial
+state; perturbation instead adds seeded noise to the current evolving state. The
+engine does not clip concentrations, and non-finite results fail explicitly.
 
 The original batch configuration remains in
-`backend/app/core/turing_parameters.json`; its standalone entry point still needs
-the path cleanup described in P1.
+`backend/app/core/turing_parameters.json`; its standalone entry point resolves
+configuration and output paths independently of the current working directory.
 
 ## Deployment
 

@@ -2,7 +2,6 @@ import numpy as np
 
 from app.core.turing import TuringSimulator
 
-
 CONTROLS = {
     "F1": 0.04,
     "F2": 0.08,

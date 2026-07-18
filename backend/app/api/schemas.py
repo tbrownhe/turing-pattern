@@ -4,13 +4,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-
-FeedRate = Annotated[
-    float, Field(ge=0.0, le=0.1, allow_inf_nan=False, strict=True)
-]
-KillRate = Annotated[
-    float, Field(ge=0.0, le=0.1, allow_inf_nan=False, strict=True)
-]
+FeedRate = Annotated[float, Field(ge=0.0, le=0.1, allow_inf_nan=False, strict=True)]
+KillRate = Annotated[float, Field(ge=0.0, le=0.1, allow_inf_nan=False, strict=True)]
 DiffusionRate = Annotated[
     float, Field(ge=0.0, le=1.0, allow_inf_nan=False, strict=True)
 ]
@@ -51,9 +46,9 @@ class ResetMessage(StrictModel):
 
 class PerturbMessage(StrictModel):
     type: Literal["perturb"]
-    noise: Annotated[
-        float, Field(gt=0.0, le=1.0, allow_inf_nan=False, strict=True)
-    ] = 0.25
+    noise: Annotated[float, Field(gt=0.0, le=1.0, allow_inf_nan=False, strict=True)] = (
+        0.25
+    )
 
 
 class PauseMessage(StrictModel):
@@ -73,7 +68,7 @@ ClientMessage = Annotated[
     | ResumeMessage,
     Field(discriminator="type"),
 ]
-client_message_adapter = TypeAdapter(ClientMessage)
+client_message_adapter: TypeAdapter[ClientMessage] = TypeAdapter(ClientMessage)
 
 
 class RenderRequest(StrictModel):

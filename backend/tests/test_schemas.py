@@ -5,7 +5,6 @@ from pydantic import ValidationError
 
 from app.api.schemas import ControlsMessage, StartMessage, parse_client_message
 
-
 VALID_CONTROLS = {
     "F1": 0.04,
     "F2": 0.08,

@@ -1,22 +1,18 @@
-# Stage 1: Build the frontend
-FROM node:20 AS builder
+FROM node:20@sha256:8f693eaa7e0a8e71560c9a82b55fd54c2ae920a2ba5d2cde28bac7d1c01c9ba5 AS builder
+
 WORKDIR /app
-
-# Install dependencies and build
-COPY package*.json /app/
-
+COPY package*.json ./
 RUN npm ci
-
-COPY ./ /app/
-
+COPY . .
 RUN npm run build
 
-# Stage 2: Serve with Nginx
-FROM nginx:alpine 
+FROM nginx:alpine@sha256:92beca9cca766b7431d092881f46486485062f0b96ba77e15781269d65bbfe32
 
-# Copy built files into container
+COPY nginx-main.conf /etc/nginx/nginx.conf
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=builder /app/dist /usr/share/nginx/html
-COPY ./nginx.conf /etc/nginx/conf.d/default.conf
 
-EXPOSE 80
+USER nginx
+EXPOSE 8080
+ENTRYPOINT []
 CMD ["nginx", "-g", "daemon off;"]

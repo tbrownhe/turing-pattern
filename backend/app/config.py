@@ -12,9 +12,7 @@ def _get_int(name: str, default: int, *, minimum: int, maximum: int) -> int:
     return value
 
 
-def _get_float(
-    name: str, default: float, *, minimum: float, maximum: float
-) -> float:
+def _get_float(name: str, default: float, *, minimum: float, maximum: float) -> float:
     raw = os.getenv(name)
     value = default if raw is None else float(raw)
     if not minimum <= value <= maximum:
@@ -36,12 +34,21 @@ def _get_bool(name: str, default: bool) -> bool:
 
 def _get_origins(name: str) -> tuple[str, ...]:
     raw = os.getenv(name, "http://localhost:3000,http://localhost:5173")
-    origins = tuple(origin.strip().rstrip("/") for origin in raw.split(",") if origin.strip())
+    origins = tuple(
+        origin.strip().rstrip("/") for origin in raw.split(",") if origin.strip()
+    )
     if not origins:
         raise ValueError(f"{name} must contain at least one origin")
     if "*" in origins:
         raise ValueError(f"{name} may not contain a wildcard origin")
     return origins
+
+
+def _get_log_level(name: str, default: str = "INFO") -> str:
+    value = os.getenv(name, default).upper()
+    if value not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+        raise ValueError(f"{name} must be a standard Python log level")
+    return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,13 +69,16 @@ class Settings:
     render_size: int
     render_steps: int
     render_upsample: int
+    log_level: str
 
     @classmethod
-    def from_env(cls) -> "Settings":
+    def from_env(cls) -> Settings:
         max_jobs = _get_int("TURING_MAX_COMPUTE_JOBS", 2, minimum=1, maximum=16)
         workers = _get_int("TURING_COMPUTE_WORKERS", 2, minimum=1, maximum=16)
         if workers > max_jobs:
-            raise ValueError("TURING_COMPUTE_WORKERS may not exceed TURING_MAX_COMPUTE_JOBS")
+            raise ValueError(
+                "TURING_COMPUTE_WORKERS may not exceed TURING_MAX_COMPUTE_JOBS"
+            )
 
         return cls(
             allowed_origins=_get_origins("TURING_ALLOWED_ORIGINS"),
@@ -93,30 +103,23 @@ class Settings:
             idle_timeout_seconds=_get_float(
                 "TURING_IDLE_TIMEOUT_SECONDS", 600.0, minimum=10.0, maximum=3600.0
             ),
-            frame_rate=_get_float(
-                "TURING_FRAME_RATE", 10.0, minimum=1.0, maximum=30.0
-            ),
+            frame_rate=_get_float("TURING_FRAME_RATE", 10.0, minimum=1.0, maximum=30.0),
             steps_per_frame=_get_int(
                 "TURING_STEPS_PER_FRAME", 25, minimum=1, maximum=200
             ),
-            preview_size=_get_int(
-                "TURING_PREVIEW_SIZE", 256, minimum=32, maximum=512
-            ),
+            preview_size=_get_int("TURING_PREVIEW_SIZE", 256, minimum=32, maximum=512),
             max_websocket_message_bytes=_get_int(
                 "TURING_MAX_WEBSOCKET_MESSAGE_BYTES",
                 4096,
                 minimum=256,
                 maximum=65_536,
             ),
-            render_size=_get_int(
-                "TURING_RENDER_SIZE", 256, minimum=32, maximum=512
-            ),
+            render_size=_get_int("TURING_RENDER_SIZE", 256, minimum=32, maximum=512),
             render_steps=_get_int(
                 "TURING_RENDER_STEPS", 5000, minimum=100, maximum=20_000
             ),
-            render_upsample=_get_int(
-                "TURING_RENDER_UPSAMPLE", 2, minimum=1, maximum=4
-            ),
+            render_upsample=_get_int("TURING_RENDER_UPSAMPLE", 2, minimum=1, maximum=4),
+            log_level=_get_log_level("TURING_LOG_LEVEL"),
         )
 
 

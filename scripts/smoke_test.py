@@ -7,12 +7,13 @@ Run after ``docker compose -f docker-compose.local.yml up -d`` with:
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 import websockets
-
 
 BASE_URL = "http://127.0.0.1:3000"
 CONTROLS = {
@@ -51,8 +52,10 @@ def check_http() -> None:
 
 
 async def check_websocket() -> None:
+    parsed = urlparse(BASE_URL)
+    websocket_scheme = "wss" if parsed.scheme == "https" else "ws"
     async with websockets.connect(
-        "ws://127.0.0.1:3000/ws",
+        f"{websocket_scheme}://{parsed.netloc}/ws",
         origin=BASE_URL,
         open_timeout=5,
     ) as websocket:
@@ -75,6 +78,10 @@ async def check_websocket() -> None:
 
 
 def main() -> None:
+    global BASE_URL
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--url", default=BASE_URL)
+    BASE_URL = parser.parse_args().url.rstrip("/")
     check_http()
     asyncio.run(check_websocket())
     print("Local HTTP, render, security-header, and WebSocket smoke tests passed.")

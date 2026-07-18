@@ -1,7 +1,7 @@
 services:
   backend:
-    image: 'turing-backend:${TAG:-latest}'
-    restart: unless-stopped
+    image: 'turing-backend:${TAG:-dev}'
+    restart: on-failure:5
     build:
       context: ./backend
     environment:
@@ -10,6 +10,7 @@ services:
       TURING_MAX_COMPUTE_JOBS: ${TURING_MAX_COMPUTE_JOBS:-2}
       TURING_MAX_COMPUTE_WAITERS: ${TURING_MAX_COMPUTE_WAITERS:-2}
       TURING_COMPUTE_WORKERS: ${TURING_COMPUTE_WORKERS:-2}
+      TURING_LOG_LEVEL: ${TURING_LOG_LEVEL:-INFO}
     ports:
       - "127.0.0.1:8000:8000"
     healthcheck:
@@ -21,21 +22,27 @@ services:
     cpus: ${BACKEND_CPU_LIMIT:-4.0}
     mem_limit: ${BACKEND_MEMORY_LIMIT:-2g}
     pids_limit: 128
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
+    stop_grace_period: 30s
 
   frontend:
-    image: 'turing-frontend:${TAG:-latest}'
-    restart: unless-stopped
+    image: 'turing-frontend:${TAG:-dev}'
+    restart: on-failure:5
     depends_on:
       backend:
         condition: service_healthy
     build:
       context: ./frontend
     ports:
-      - "127.0.0.1:3000:80"
+      - "127.0.0.1:3000:8080"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -43,5 +50,11 @@ services:
     cpus: ${FRONTEND_CPU_LIMIT:-0.5}
     mem_limit: ${FRONTEND_MEMORY_LIMIT:-256m}
     pids_limit: 64
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
+    stop_grace_period: 15s

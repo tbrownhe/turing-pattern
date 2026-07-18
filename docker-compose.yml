@@ -1,7 +1,7 @@
 services:
   backend:
-    image: '${STACK_NAME?Variable not set}-backend:${TAG:-latest}'
-    restart: unless-stopped
+    image: '${STACK_NAME?Variable not set}-backend:${TAG?Variable not set}'
+    restart: on-failure:5
     build:
       context: ./backend
     environment:
@@ -15,6 +15,7 @@ services:
       TURING_IDLE_TIMEOUT_SECONDS: ${TURING_IDLE_TIMEOUT_SECONDS:-600}
       TURING_FRAME_RATE: ${TURING_FRAME_RATE:-10}
       TURING_STEPS_PER_FRAME: ${TURING_STEPS_PER_FRAME:-25}
+      TURING_LOG_LEVEL: ${TURING_LOG_LEVEL:-INFO}
     networks:
       - default
     healthcheck:
@@ -26,16 +27,26 @@ services:
     cpus: ${BACKEND_CPU_LIMIT:-4.0}
     mem_limit: ${BACKEND_MEMORY_LIMIT:-2g}
     pids_limit: 128
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
+    stop_grace_period: 30s
+    ulimits:
+      nofile:
+        soft: 1024
+        hard: 2048
     logging:
       options:
         max-size: "10m"
         max-file: "3"
 
   frontend:
-    image: '${STACK_NAME?Variable not set}-frontend:${TAG:-latest}'
-    restart: unless-stopped
+    image: '${STACK_NAME?Variable not set}-frontend:${TAG?Variable not set}'
+    restart: on-failure:5
     depends_on:
       backend:
         condition: service_healthy
@@ -45,7 +56,7 @@ services:
     build:
       context: ./frontend
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
       interval: 30s
       timeout: 3s
       retries: 3
@@ -53,8 +64,18 @@ services:
     cpus: ${FRONTEND_CPU_LIMIT:-0.5}
     mem_limit: ${FRONTEND_MEMORY_LIMIT:-256m}
     pids_limit: 64
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
+    stop_grace_period: 15s
+    ulimits:
+      nofile:
+        soft: 1024
+        hard: 2048
     logging:
       options:
         max-size: "10m"
@@ -64,7 +85,7 @@ services:
       - traefik.docker.network=traefik-public
       - traefik.constraint-label=traefik-public
 
-      - traefik.http.services.${STACK_NAME?Variable not set}-frontend.loadbalancer.server.port=80
+      - traefik.http.services.${STACK_NAME?Variable not set}-frontend.loadbalancer.server.port=8080
 
       - traefik.http.middlewares.${STACK_NAME?Variable not set}-https-redirect.redirectscheme.scheme=https
       - traefik.http.middlewares.${STACK_NAME?Variable not set}-https-redirect.redirectscheme.permanent=true

@@ -1,19 +1,24 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from dataclasses import dataclass
 from io import BytesIO
-from time import monotonic
+from time import monotonic, perf_counter
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import ValidationError
+from fastapi.responses import PlainTextResponse
 from PIL import Image, PngImagePlugin
+from pydantic import ValidationError
 from starlette.websockets import WebSocketDisconnect
 
 from app.api.schemas import (
+    ClientMessage,
     ControlsMessage,
     PauseMessage,
     PerturbMessage,
@@ -24,9 +29,10 @@ from app.api.schemas import (
     parse_client_message,
 )
 from app.config import Settings, settings
-from app.core.turing import SimulationError, TuringSimulator
+from app.core.engine import SimulationError, TuringSimulator
+from app.core.models import ENGINE_VERSION
+from app.observability import configure_logging
 from app.runtime import ComputeRuntime
-
 
 logger = logging.getLogger(__name__)
 
@@ -38,36 +44,73 @@ class ClientProtocolError(ValueError):
         self.message = message
 
 
-def _encode_preview(simulator: TuringSimulator, steps: int) -> bytes:
+@dataclass(frozen=True, slots=True)
+class FrameResult:
+    content: bytes
+    step_seconds: float
+    encode_seconds: float
+
+
+@dataclass(frozen=True, slots=True)
+class RenderResult:
+    content: bytes
+    simulation_seconds: float
+    encode_seconds: float
+
+
+def _encode_preview(simulator: TuringSimulator, steps: int) -> FrameResult:
+    started = perf_counter()
     frame = simulator.step(steps=steps)
+    step_seconds = perf_counter() - started
+    started = perf_counter()
     output = BytesIO()
     Image.fromarray(frame).save(output, format="PNG", optimize=False)
-    return output.getvalue()
+    return FrameResult(
+        content=output.getvalue(),
+        step_seconds=step_seconds,
+        encode_seconds=perf_counter() - started,
+    )
 
 
-def _render_png(payload: RenderRequest, config: Settings) -> bytes:
+def _render_png(payload: RenderRequest, config: Settings) -> RenderResult:
+    started = perf_counter()
     simulator = TuringSimulator(
         payload.controls.model_dump(),
         shape=(config.render_size, config.render_size),
         seed=payload.seed,
     )
     frame = simulator.step(steps=config.render_steps)
+    simulation_seconds = perf_counter() - started
+    started = perf_counter()
     image = Image.fromarray(frame).convert("L")
     if config.render_upsample != 1:
         output_size = config.render_size * config.render_upsample
         image = image.resize((output_size, output_size), Image.Resampling.BICUBIC)
 
     metadata = PngImagePlugin.PngInfo()
+    recipe = {
+        "engine_version": ENGINE_VERSION,
+        "boundary": "periodic",
+        "dtype": simulator.config.dtype,
+        "simulation_size": config.render_size,
+        "steps": config.render_steps,
+        "upsample": config.render_upsample,
+        **payload.model_dump(),
+    }
     metadata.add_text(
         "TuringParams",
-        payload.model_dump_json(indent=2),
+        json.dumps(recipe, indent=2),
     )
     output = BytesIO()
     image.save(output, format="PNG", pnginfo=metadata)
-    return output.getvalue()
+    return RenderResult(
+        content=output.getvalue(),
+        simulation_seconds=simulation_seconds,
+        encode_seconds=perf_counter() - started,
+    )
 
 
-async def _receive_message(websocket: WebSocket, config: Settings):
+async def _receive_message(websocket: WebSocket, config: Settings) -> ClientMessage:
     try:
         raw = await websocket.receive_text()
     except WebSocketDisconnect:
@@ -111,12 +154,30 @@ def _origin_is_allowed(websocket: WebSocket, config: Settings) -> bool:
 
 def create_app(config: Settings = settings) -> FastAPI:
     @asynccontextmanager
-    async def lifespan(application: FastAPI):
+    async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        configure_logging(config.log_level)
         runtime = ComputeRuntime(config)
         application.state.runtime = runtime
+        monitor_stopped = asyncio.Event()
+
+        async def monitor_event_loop() -> None:
+            interval = 1.0
+            expected = monotonic() + interval
+            while not monitor_stopped.is_set():
+                await asyncio.sleep(interval)
+                now = monotonic()
+                runtime.metrics.set_event_loop_lag(now - expected)
+                expected = now + interval
+
+        monitor_task = asyncio.create_task(
+            monitor_event_loop(), name="event-loop-monitor"
+        )
         try:
             yield
         finally:
+            monitor_stopped.set()
+            monitor_task.cancel()
+            await asyncio.gather(monitor_task, return_exceptions=True)
             runtime.close()
 
     application = FastAPI(
@@ -150,25 +211,47 @@ def create_app(config: Settings = settings) -> FastAPI:
             "compute_capacity": runtime.gate.capacity,
         }
 
+    @application.get(
+        "/metrics", response_class=PlainTextResponse, include_in_schema=False
+    )
+    async def metrics(request: Request) -> PlainTextResponse:
+        runtime: ComputeRuntime = request.app.state.runtime
+        return PlainTextResponse(
+            runtime.metrics.prometheus_text(
+                active=runtime.gate.active,
+                waiting=runtime.gate.waiting,
+                capacity=runtime.gate.capacity,
+            ),
+            media_type="text/plain; version=0.0.4",
+        )
+
     @application.post("/api/v1/generate", response_class=Response)
     async def generate(payload: RenderRequest, request: Request) -> Response:
         runtime: ComputeRuntime = request.app.state.runtime
         request_id = uuid4().hex
         if not await runtime.gate.acquire():
+            runtime.metrics.increment("renders_rejected")
             raise HTTPException(
                 status_code=503,
                 detail={
                     "code": "server_busy",
-                    "message": "Render capacity is currently full. Please retry shortly.",
+                    "message": (
+                        "Render capacity is currently full. Please retry shortly."
+                    ),
                 },
                 headers={"Retry-After": "2", "X-Request-ID": request_id},
             )
 
-        logger.info("render_started request_id=%s", request_id)
+        runtime.metrics.increment("renders_started")
+        logger.info(
+            "render started",
+            extra={"event": "render_started", "request_id": request_id},
+        )
         started = monotonic()
         try:
-            content = await runtime.run(_render_png, payload, config)
+            result = await runtime.run(_render_png, payload, config)
         except SimulationError as error:
+            runtime.metrics.increment("numerical_failures")
             raise HTTPException(
                 status_code=422,
                 detail={"code": "simulation_failed", "message": str(error)},
@@ -177,19 +260,30 @@ def create_app(config: Settings = settings) -> FastAPI:
         finally:
             runtime.gate.release()
 
+        duration = monotonic() - started
+        runtime.metrics.increment("renders_finished")
+        runtime.metrics.observe_render(
+            duration,
+            result.simulation_seconds,
+            result.encode_seconds,
+        )
         logger.info(
-            "render_completed request_id=%s duration_seconds=%.3f bytes=%d",
-            request_id,
-            monotonic() - started,
-            len(content),
+            "render completed",
+            extra={
+                "event": "render_completed",
+                "request_id": request_id,
+                "duration_seconds": duration,
+                "frame_bytes": len(result.content),
+            },
         )
         return Response(
-            content=content,
+            content=result.content,
             media_type="image/png",
             headers={
                 "Cache-Control": "no-store",
                 "Content-Disposition": 'attachment; filename="turing-pattern.png"',
                 "X-Request-ID": request_id,
+                "X-Turing-Engine": ENGINE_VERSION,
             },
         )
 
@@ -201,10 +295,12 @@ def create_app(config: Settings = settings) -> FastAPI:
         tasks: set[asyncio.Task[None]] = set()
 
         if not _origin_is_allowed(websocket, config):
+            runtime.metrics.increment("sessions_rejected")
             await websocket.close(code=1008, reason="WebSocket origin is not allowed.")
             return
 
         if not await runtime.gate.acquire():
+            runtime.metrics.increment("sessions_rejected")
             await websocket.accept()
             await _send_error_and_close(
                 websocket,
@@ -214,7 +310,11 @@ def create_app(config: Settings = settings) -> FastAPI:
             )
             return
 
-        logger.info("websocket_started session_id=%s", session_id)
+        runtime.metrics.increment("sessions_started")
+        logger.info(
+            "websocket started",
+            extra={"event": "websocket_started", "session_id": session_id},
+        )
         started = monotonic()
         try:
             await websocket.accept()
@@ -304,7 +404,10 @@ def create_app(config: Settings = settings) -> FastAPI:
                         frame = await runtime.run(
                             _encode_preview, simulator, config.steps_per_frame
                         )
-                    await websocket.send_bytes(frame)
+                    runtime.metrics.observe_frame(
+                        frame.step_seconds, frame.encode_seconds, len(frame.content)
+                    )
+                    await websocket.send_bytes(frame.content)
                     delay = frame_interval - (monotonic() - frame_started)
                     if delay > 0:
                         await asyncio.sleep(delay)
@@ -328,8 +431,24 @@ def create_app(config: Settings = settings) -> FastAPI:
                 await _send_error_and_close(
                     websocket, error.code, error.message, close_code=1008
                 )
+        except SimulationError:
+            runtime.metrics.increment("numerical_failures")
+            logger.exception(
+                "websocket simulation failed",
+                extra={"event": "websocket_failed", "session_id": session_id},
+            )
+            if accepted:
+                await _send_error_and_close(
+                    websocket,
+                    "simulation_failed",
+                    "The simulation left its stable numerical range.",
+                    close_code=1011,
+                )
         except Exception:
-            logger.exception("websocket_failed session_id=%s", session_id)
+            logger.exception(
+                "websocket failed",
+                extra={"event": "websocket_failed", "session_id": session_id},
+            )
             if accepted:
                 await _send_error_and_close(
                     websocket,
@@ -344,10 +463,14 @@ def create_app(config: Settings = settings) -> FastAPI:
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
             runtime.gate.release()
+            runtime.metrics.increment("sessions_finished")
             logger.info(
-                "websocket_finished session_id=%s duration_seconds=%.3f",
-                session_id,
-                monotonic() - started,
+                "websocket finished",
+                extra={
+                    "event": "websocket_finished",
+                    "session_id": session_id,
+                    "duration_seconds": monotonic() - started,
+                },
             )
 
     return application

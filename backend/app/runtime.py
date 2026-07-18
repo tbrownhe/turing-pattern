@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
 
 from app.config import Settings
-
+from app.observability import Metrics
 
 Result = TypeVar("Result")
 
@@ -49,6 +50,7 @@ class CapacityGate:
 class ComputeRuntime:
     def __init__(self, config: Settings):
         self.config = config
+        self.metrics = Metrics()
         self.gate = CapacityGate(
             config.max_compute_jobs,
             config.max_compute_waiters,
