@@ -332,21 +332,26 @@ Done when:
 - Deterministic restart, random seed, and state-only perturbation are distinct actions.
 - Frontend tests cover validation, serialization, restoration, presets, and resets.
 
-#### [ ] P2.1b Finish the Live Lab interaction design
+#### [x] P2.1b Add complete server-backed Live Lab interactions
 
-- Start with basic controls: preset, scale, variation/seed, and contrast. Put raw
-  `F`, `k`, `Du`, `Dv`, endpoint gradients, and numerical details in an Advanced
-  panel.
-- Allow uniform values or independent horizontal/vertical gradients without making
-  users reason about “1” and “2”. Visually place endpoint handles next to the edge
-  they affect.
-- Add reset, pause, single-step, perturb, deterministic reseed, random seed, undo/redo,
-  and before/after comparison.
-- Build a responsive layout that works on phone, keyboard, touch, zoom, and screen
-  readers. Use real labels, visible focus, sufficient contrast, and reduced-motion
-  behavior.
+- Add display-only preview zoom and contrast without misrepresenting them as
+  numerical controls or changing downloaded pixels.
+- Support uniform chemistry and explicit edge-gradient editing without exposing
+  internal `1`/`2` suffixes in the UI.
+- Add a server-bounded single iteration step that automatically pauses and does not
+  accept a client-controlled work count.
+- Keep at most 30 recipe changes for undo/redo. Restoring history restarts the exact
+  recipe rather than pretending to restore transient simulation arrays.
+- Keep one bounded before snapshot for visual comparison and recipe restoration.
 
-#### [ ] P2.1c Design the High-Resolution Render experience
+#### [ ] P2.1c Validate Live Lab accessibility and devices
+
+- Test the responsive layout on representative phones and desktop browsers with
+  keyboard, touch, 200% zoom, and reduced motion.
+- Audit real labels, visible focus, status announcements, contrast, and screen-reader
+  reading order. Fix issues with evidence from those checks.
+
+#### [ ] P2.1d Design the High-Resolution Render experience
 
 - Show simulation resolution separately from output resolution: bicubic enlargement
   creates more pixels but not more pattern detail.

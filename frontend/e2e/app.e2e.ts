@@ -35,4 +35,15 @@ test('a visitor receives a live frame and can tune a control', async ({ page }) 
       return maximum > minimum
     })
   expect(canvasHasVariation).toBe(true)
+
+  await page.getByRole('button', { name: 'Set current as before' }).click()
+  await page.getByRole('button', { name: 'View before' }).click()
+  await expect(page.getByRole('img', { name: 'Saved before comparison' })).toBeVisible()
+  await page.getByRole('button', { name: 'View current' }).click()
+  await expect(
+    page.getByRole('img', { name: 'Live grayscale Turing pattern preview' }),
+  ).toBeVisible()
+
+  await page.getByRole('button', { name: 'Step once' }).click()
+  await expect(page.getByText('Simulation paused')).toBeVisible()
 })

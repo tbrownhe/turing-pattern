@@ -3,7 +3,12 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from app.api.schemas import ControlsMessage, StartMessage, parse_client_message
+from app.api.schemas import (
+    ControlsMessage,
+    StartMessage,
+    StepMessage,
+    parse_client_message,
+)
 
 VALID_CONTROLS = {
     "F1": 0.04,
@@ -40,6 +45,15 @@ def test_control_message_round_trips_displayed_values():
 
     assert isinstance(message, ControlsMessage)
     assert message.controls.F1 == 0.04
+
+
+def test_step_message_has_no_client_controlled_work_size():
+    message = parse({"type": "step"})
+
+    assert isinstance(message, StepMessage)
+
+    with pytest.raises(ValidationError):
+        parse({"type": "step", "iterations": 1_000_000})
 
 
 @pytest.mark.parametrize(

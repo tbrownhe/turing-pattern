@@ -39,6 +39,23 @@ class MockWebSocket {
   }
 }
 
+function sendReady(websocket: MockWebSocket) {
+  act(() => {
+    websocket.open()
+    websocket.onmessage?.(
+      new MessageEvent('message', {
+        data: JSON.stringify({
+          type: 'ready',
+          protocol_version: 1,
+          engine_version: '2.0.0',
+          preview_size: 256,
+          frame_rate: 10,
+        }),
+      }),
+    )
+  })
+}
+
 
 describe('live controls', () => {
   beforeEach(() => {
@@ -152,20 +169,7 @@ describe('live controls', () => {
   it('applies an exact seed and records it in the share URL', async () => {
     render(<App />)
     const websocket = MockWebSocket.instances[0]
-    act(() => {
-      websocket.open()
-      websocket.onmessage?.(
-        new MessageEvent('message', {
-          data: JSON.stringify({
-            type: 'ready',
-            protocol_version: 1,
-            engine_version: '2.0.0',
-            preview_size: 256,
-            frame_rate: 10,
-          }),
-        }),
-      )
-    })
+    sendReady(websocket)
 
     fireEvent.change(screen.getByLabelText('Seed'), {
       target: { value: '424242' },
@@ -178,5 +182,79 @@ describe('live controls', () => {
     })
     await act(() => vi.advanceTimersByTimeAsync(100))
     expect(decodeURIComponent(window.location.search)).toContain('424242')
+  })
+
+  it('pauses before requesting one numerical step', () => {
+    render(<App />)
+    const websocket = MockWebSocket.instances[0]
+    sendReady(websocket)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Step once' }))
+
+    const messages = websocket.sent.map((raw) => JSON.parse(raw))
+    expect(messages.at(-2)).toEqual({ type: 'pause' })
+    expect(messages.at(-1)).toEqual({ type: 'step' })
+    expect(screen.getByText('Simulation paused')).toBeTruthy()
+  })
+
+  it('undoes and redoes complete recipes with deterministic restarts', () => {
+    render(<App />)
+    const websocket = MockWebSocket.instances[0]
+    sendReady(websocket)
+
+    fireEvent.change(screen.getByLabelText('Pattern family'), {
+      target: { value: 'coral' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Undo recipe' }))
+
+    let messages = websocket.sent.map((raw) => JSON.parse(raw))
+    expect(messages.at(-2)).toEqual({
+      type: 'controls',
+      controls: recipeForPreset('mixed').controls,
+    })
+    expect(messages.at(-1)).toEqual({ type: 'reset', seed: 0 })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Redo recipe' }))
+    messages = websocket.sent.map((raw) => JSON.parse(raw))
+    expect(messages.at(-2)).toEqual({
+      type: 'controls',
+      controls: recipeForPreset('coral').controls,
+    })
+    expect(messages.at(-1)).toEqual({ type: 'reset', seed: 0 })
+  })
+
+  it('updates both endpoints when editing uniform chemistry', async () => {
+    const maze = recipeForPreset('maze')
+    window.localStorage.setItem(RECIPE_STORAGE_KEY, serializeRecipe(maze))
+    render(<App />)
+    const websocket = MockWebSocket.instances[0]
+    sendReady(websocket)
+    fireEvent.click(screen.getByText('Advanced chemistry'))
+
+    fireEvent.change(screen.getByRole('slider', { name: 'Feed' }), {
+      target: { value: '0.045' },
+    })
+    await act(() => vi.advanceTimersByTimeAsync(50))
+
+    const message = JSON.parse(websocket.sent.at(-1) ?? '{}')
+    expect(message.controls).toEqual(
+      expect.objectContaining({ F1: 0.045, F2: 0.045 }),
+    )
+  })
+
+  it('keeps preview zoom and contrast out of the simulation protocol', () => {
+    render(<App />)
+    const websocket = MockWebSocket.instances[0]
+    sendReady(websocket)
+    const sentBefore = websocket.sent.length
+
+    fireEvent.change(screen.getByRole('slider', { name: 'Zoom' }), {
+      target: { value: '2' },
+    })
+    fireEvent.change(screen.getByRole('slider', { name: 'Contrast' }), {
+      target: { value: '1.8' },
+    })
+
+    expect(websocket.sent).toHaveLength(sentBefore)
   })
 })

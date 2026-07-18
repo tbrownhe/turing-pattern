@@ -56,6 +56,30 @@ const statusText: Record<ConnectionState, string> = {
   failed: 'The live simulator is unavailable.',
 }
 
+const HISTORY_LIMIT = 30
+
+interface ComparisonSnapshot {
+  recipe: PatternRecipe
+  imageUrl: string
+}
+
+function controlsHaveGradient(controls: Controls): boolean {
+  return (
+    controls.F1 !== controls.F2 ||
+    controls.K1 !== controls.K2 ||
+    controls.Du1 !== controls.Du2 ||
+    controls.Dv1 !== controls.Dv2
+  )
+}
+
+function cloneRecipe(recipe: PatternRecipe): PatternRecipe {
+  return { ...recipe, controls: { ...recipe.controls } }
+}
+
+function recipesMatch(first: PatternRecipe, second: PatternRecipe): boolean {
+  return serializeRecipe(first) === serializeRecipe(second)
+}
+
 interface SliderProps {
   control: ControlKey
   label: string
@@ -111,8 +135,17 @@ function App() {
   const [hasFrame, setHasFrame] = useState(false)
   const [reconnectKey, setReconnectKey] = useState(0)
   const [userPaused, setUserPaused] = useState(false)
+  const [gradientEditing, setGradientEditing] = useState(() =>
+    controlsHaveGradient(loadedRecipe.recipe.controls),
+  )
+  const [previewZoom, setPreviewZoom] = useState(1)
+  const [previewContrast, setPreviewContrast] = useState(1)
+  const [comparison, setComparison] = useState<ComparisonSnapshot | null>(null)
+  const [showBefore, setShowBefore] = useState(false)
+  const [historyCounts, setHistoryCounts] = useState({ undo: 0, redo: 0 })
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const advancedRef = useRef<HTMLDetailsElement | null>(null)
   const importRef = useRef<HTMLInputElement | null>(null)
   const socketRef = useRef<WebSocket | null>(null)
   const recipeRef = useRef<PatternRecipe>(loadedRecipe.recipe)
@@ -120,6 +153,8 @@ function App() {
   const pausedRef = useRef(false)
   const latestFrameRef = useRef(0)
   const engineVersionRef = useRef(loadedRecipe.recipe.engine_version)
+  const undoStackRef = useRef<PatternRecipe[]>([])
+  const redoStackRef = useRef<PatternRecipe[]>([])
 
   const send = useCallback((message: object) => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
@@ -133,6 +168,21 @@ function App() {
     setRecipeName(nextRecipe.name)
     setSeedDraft(String(nextRecipe.seed))
   }, [])
+
+  const recordRecipe = useCallback(
+    (nextRecipe: PatternRecipe) => {
+      const current = recipeRef.current
+      if (recipesMatch(current, nextRecipe)) return
+      undoStackRef.current = [
+        ...undoStackRef.current.slice(-(HISTORY_LIMIT - 1)),
+        cloneRecipe(current),
+      ]
+      redoStackRef.current = []
+      setHistoryCounts({ undo: undoStackRef.current.length, redo: 0 })
+      commitRecipe(nextRecipe)
+    },
+    [commitRecipe],
+  )
 
   const clearQueuedControls = useCallback(() => {
     if (controlsTimerRef.current !== null) {
@@ -149,12 +199,14 @@ function App() {
         engine_version: engineVersionRef.current,
         controls: { ...nextRecipe.controls },
       }
-      commitRecipe(normalized)
+      recordRecipe(normalized)
+      setGradientEditing(controlsHaveGradient(normalized.controls))
+      setShowBefore(false)
       send(controlsMessage(normalized.controls))
       send({ type: 'reset', seed: normalized.seed })
       if (notice) setRecipeNotice(notice)
     },
-    [clearQueuedControls, commitRecipe, send],
+    [clearQueuedControls, recordRecipe, send],
   )
 
   const queueControls = (nextControls: Controls) => {
@@ -164,7 +216,7 @@ function App() {
       preset: 'custom',
       controls: nextControls,
     }
-    commitRecipe(nextRecipe)
+    recordRecipe(nextRecipe)
     if (controlsTimerRef.current !== null) return
 
     controlsTimerRef.current = window.setTimeout(() => {
@@ -175,6 +227,15 @@ function App() {
 
   const handleControlChange = (key: ControlKey, value: number) => {
     queueControls(updateControl(recipeRef.current.controls, key, value))
+  }
+
+  const handleUniformControlChange = (key: ControlKey, value: number) => {
+    const controls = { ...recipeRef.current.controls }
+    if (key === 'F1') controls.F1 = controls.F2 = value
+    else if (key === 'K1') controls.K1 = controls.K2 = value
+    else if (key === 'Du1') controls.Du1 = controls.Du2 = value
+    else if (key === 'Dv1') controls.Dv1 = controls.Dv2 = value
+    queueControls(controls)
   }
 
   const selectPreset = (presetId: PresetId) => {
@@ -193,7 +254,14 @@ function App() {
       Du2: current.Du1,
       Dv2: current.Dv1,
     })
+    setGradientEditing(false)
     setRecipeNotice('Edge gradients removed. The current simulation keeps evolving.')
+  }
+
+  const editGradients = () => {
+    setGradientEditing(true)
+    if (advancedRef.current) advancedRef.current.open = true
+    setRecipeNotice('Edge editing enabled. Set each side independently in Advanced chemistry.')
   }
 
   const togglePaused = () => {
@@ -217,7 +285,7 @@ function App() {
       return
     }
     const nextRecipe = { ...recipeRef.current, seed }
-    commitRecipe(nextRecipe)
+    recordRecipe(nextRecipe)
     send({ type: 'reset', seed })
     setRecipeNotice(`Restarted with seed ${seed}.`)
   }
@@ -225,7 +293,7 @@ function App() {
   const randomSeed = () => {
     const seed = crypto.getRandomValues(new Uint32Array(1))[0]
     const nextRecipe = { ...recipeRef.current, seed }
-    commitRecipe(nextRecipe)
+    recordRecipe(nextRecipe)
     send({ type: 'reset', seed })
     setRecipeNotice(`New random seed: ${seed}.`)
   }
@@ -235,6 +303,75 @@ function App() {
     setRecipeNotice('Added noise to the current state without changing its recipe.')
   }
 
+  const stepOnce = () => {
+    if (!pausedRef.current) {
+      pausedRef.current = true
+      setUserPaused(true)
+      setConnectionState('paused')
+      send({ type: 'pause' })
+    }
+    send({ type: 'step' })
+    setRecipeNotice('Advanced the paused simulation by one numerical iteration.')
+  }
+
+  const restoreHistoryRecipe = (nextRecipe: PatternRecipe, notice: string) => {
+    clearQueuedControls()
+    const normalized = {
+      ...cloneRecipe(nextRecipe),
+      engine_version: engineVersionRef.current,
+    }
+    commitRecipe(normalized)
+    setGradientEditing(controlsHaveGradient(normalized.controls))
+    setShowBefore(false)
+    send(controlsMessage(normalized.controls))
+    send({ type: 'reset', seed: normalized.seed })
+    setRecipeNotice(notice)
+  }
+
+  const undoRecipe = () => {
+    const previous = undoStackRef.current.pop()
+    if (!previous) return
+    redoStackRef.current = [
+      ...redoStackRef.current.slice(-(HISTORY_LIMIT - 1)),
+      cloneRecipe(recipeRef.current),
+    ]
+    setHistoryCounts({
+      undo: undoStackRef.current.length,
+      redo: redoStackRef.current.length,
+    })
+    restoreHistoryRecipe(previous, 'Undid the last recipe change and restarted.')
+  }
+
+  const redoRecipe = () => {
+    const next = redoStackRef.current.pop()
+    if (!next) return
+    undoStackRef.current = [
+      ...undoStackRef.current.slice(-(HISTORY_LIMIT - 1)),
+      cloneRecipe(recipeRef.current),
+    ]
+    setHistoryCounts({
+      undo: undoStackRef.current.length,
+      redo: redoStackRef.current.length,
+    })
+    restoreHistoryRecipe(next, 'Redid the recipe change and restarted.')
+  }
+
+  const captureBefore = () => {
+    const canvas = canvasRef.current
+    if (!canvas || !hasFrame) return
+    setComparison({
+      recipe: cloneRecipe(recipeRef.current),
+      imageUrl: canvas.toDataURL('image/png'),
+    })
+    setShowBefore(false)
+    setRecipeNotice('Saved the current frame and recipe as the before comparison.')
+  }
+
+  const restoreBefore = () => {
+    if (!comparison) return
+    applyRecipe(comparison.recipe, 'Restored the before recipe and restarted it.')
+  }
+
   const saveRecipeName = () => {
     const name = recipeName.trim()
     if (!name) {
@@ -242,7 +379,7 @@ function App() {
       setRecipeNotice('Recipe names cannot be empty.')
       return
     }
-    commitRecipe({ ...recipeRef.current, name: name.slice(0, 80) })
+    recordRecipe({ ...recipeRef.current, name: name.slice(0, 80) })
   }
 
   const copyRecipeLink = async () => {
@@ -458,11 +595,7 @@ function App() {
     connectionState === 'timed-out' ||
     connectionState === 'failed'
   const selectedPreset = PRESETS.find((preset) => preset.id === recipe.preset)
-  const hasGradient =
-    recipe.controls.F1 !== recipe.controls.F2 ||
-    recipe.controls.K1 !== recipe.controls.K2 ||
-    recipe.controls.Du1 !== recipe.controls.Du2 ||
-    recipe.controls.Dv1 !== recipe.controls.Dv2
+  const hasGradient = controlsHaveGradient(recipe.controls)
 
   return (
     <main className="app-shell">
@@ -540,14 +673,65 @@ function App() {
           </form>
 
           <div className="recipe-summary">
-            <span>{hasGradient ? 'Edge gradients active' : 'Uniform chemistry'}</span>
+            <span>
+              {gradientEditing
+                ? hasGradient
+                  ? 'Edge gradients active'
+                  : 'Edge editing ready'
+                : 'Uniform chemistry'}
+            </span>
             <small>Engine {engineVersion}</small>
           </div>
-          {hasGradient && (
-            <button className="button button-full" onClick={makeUniform} disabled={!canControl}>
-              Make values uniform
+          <div className="mode-buttons" aria-label="Chemistry layout">
+            <button
+              className="button"
+              aria-pressed={!gradientEditing}
+              onClick={makeUniform}
+              disabled={!canControl}
+            >
+              Uniform
             </button>
-          )}
+            <button
+              className="button"
+              aria-pressed={gradientEditing}
+              onClick={editGradients}
+            >
+              Edge gradients
+            </button>
+          </div>
+
+          <fieldset className="display-controls">
+            <legend>Preview display</legend>
+            <div className="slider-label">
+              <label htmlFor="preview-zoom">Zoom</label>
+              <output htmlFor="preview-zoom">{previewZoom.toFixed(1)}×</output>
+            </div>
+            <input
+              id="preview-zoom"
+              type="range"
+              min={1}
+              max={3}
+              step={0.1}
+              value={previewZoom}
+              onChange={(event) => setPreviewZoom(Number(event.target.value))}
+            />
+            <div className="slider-label display-slider-label">
+              <label htmlFor="preview-contrast">Contrast</label>
+              <output htmlFor="preview-contrast">{previewContrast.toFixed(1)}×</output>
+            </div>
+            <input
+              id="preview-contrast"
+              type="range"
+              min={0.5}
+              max={2.5}
+              step={0.1}
+              value={previewContrast}
+              onChange={(event) => setPreviewContrast(Number(event.target.value))}
+            />
+            <p className="field-help">
+              Display only. These controls do not change the recipe or downloaded pixels.
+            </p>
+          </fieldset>
 
           <div className="share-actions" aria-label="Recipe sharing">
             <button className="button" onClick={copyRecipeLink}>Copy link</button>
@@ -567,23 +751,63 @@ function App() {
 
         <div className="preview-column">
           <div className={`preview-frame ${hasFrame ? 'has-frame' : ''}`}>
+            {comparison && showBefore && (
+              <img
+                src={comparison.imageUrl}
+                alt="Saved before comparison"
+                style={{
+                  filter: `contrast(${previewContrast})`,
+                  transform: `scale(${previewZoom})`,
+                }}
+              />
+            )}
             <canvas
               ref={canvasRef}
               width={previewSize}
               height={previewSize}
               role="img"
               aria-label="Live grayscale Turing pattern preview"
+              hidden={showBefore}
+              style={{
+                filter: `contrast(${previewContrast})`,
+                transform: `scale(${previewZoom})`,
+              }}
             />
-            {!hasFrame && <span>Waiting for the first pattern…</span>}
+            {!hasFrame && !showBefore && <span>Waiting for the first pattern…</span>}
           </div>
           <div className="actions">
             <button className="button button-primary" onClick={togglePaused} disabled={!canControl}>
               {userPaused ? 'Resume' : 'Pause'}
             </button>
+            <button className="button" onClick={stepOnce} disabled={!canControl}>Step once</button>
             <button className="button" onClick={restartCurrentSeed} disabled={!canControl}>Restart same seed</button>
             <button className="button" onClick={randomSeed} disabled={!canControl}>Random seed</button>
             <button className="button" onClick={perturb} disabled={!canControl}>Perturb state</button>
             <button className="button" onClick={downloadPreview} disabled={!hasFrame}>Download preview</button>
+          </div>
+          <div className="history-actions" aria-label="Recipe history">
+            <button className="button button-small" onClick={undoRecipe} disabled={!canControl || historyCounts.undo === 0}>
+              Undo recipe
+            </button>
+            <button className="button button-small" onClick={redoRecipe} disabled={!canControl || historyCounts.redo === 0}>
+              Redo recipe
+            </button>
+            <span>Up to {HISTORY_LIMIT} recipe changes</span>
+          </div>
+          <div className="comparison-actions" aria-label="Before and after comparison">
+            <button className="button button-small" onClick={captureBefore} disabled={!hasFrame}>
+              Set current as before
+            </button>
+            {comparison && (
+              <>
+                <button className="button button-small" onClick={() => setShowBefore((value) => !value)}>
+                  {showBefore ? 'View current' : 'View before'}
+                </button>
+                <button className="button button-small" onClick={restoreBefore} disabled={!canControl}>
+                  Restore before recipe
+                </button>
+              </>
+            )}
           </div>
           <p className="preview-note">
             Preview: {previewSize} × {previewSize}px. Control changes evolve the current state;
@@ -592,7 +816,7 @@ function App() {
         </div>
       </section>
 
-      <details className="advanced-panel">
+      <details ref={advancedRef} className="advanced-panel">
         <summary>
           <span>Advanced chemistry</span>
           <small>Exact Gray-Scott controls</small>
@@ -601,8 +825,9 @@ function App() {
           Feed and kill shape the reaction. U and V diffusion control how quickly each
           concentration spreads. Different endpoint values create a gradient across the image.
         </p>
-        <div className="advanced-grid">
-          <section className="control-panel">
+        {gradientEditing ? (
+          <div className="advanced-grid">
+            <section className="control-panel">
             <div className="panel-heading">
               <span>Horizontal reaction</span>
               <small>left → right</small>
@@ -611,9 +836,9 @@ function App() {
             <Slider control="F2" label="Feed · right edge" min={0} max={0.1} step={0.001} value={recipe.controls.F2} onChange={handleControlChange} />
             <Slider control="K1" label="Kill · left edge" min={0} max={0.1} step={0.001} value={recipe.controls.K1} onChange={handleControlChange} />
             <Slider control="K2" label="Kill · right edge" min={0} max={0.1} step={0.001} value={recipe.controls.K2} onChange={handleControlChange} />
-          </section>
+            </section>
 
-          <section className="control-panel">
+            <section className="control-panel">
             <div className="panel-heading">
               <span>Vertical diffusion</span>
               <small>top → bottom</small>
@@ -622,8 +847,28 @@ function App() {
             <Slider control="Du2" label="U diffusion · bottom edge" min={0} max={1} step={0.001} value={recipe.controls.Du2} onChange={handleControlChange} />
             <Slider control="Dv1" label="V diffusion · top edge" min={0} max={1} step={0.001} value={recipe.controls.Dv1} onChange={handleControlChange} />
             <Slider control="Dv2" label="V diffusion · bottom edge" min={0} max={1} step={0.001} value={recipe.controls.Dv2} onChange={handleControlChange} />
-          </section>
-        </div>
+            </section>
+          </div>
+        ) : (
+          <div className="advanced-grid uniform-grid">
+            <section className="control-panel">
+              <div className="panel-heading">
+                <span>Uniform reaction</span>
+                <small>same at every edge</small>
+              </div>
+              <Slider control="F1" label="Feed" min={0} max={0.1} step={0.001} value={recipe.controls.F1} onChange={handleUniformControlChange} />
+              <Slider control="K1" label="Kill" min={0} max={0.1} step={0.001} value={recipe.controls.K1} onChange={handleUniformControlChange} />
+            </section>
+            <section className="control-panel">
+              <div className="panel-heading">
+                <span>Uniform diffusion</span>
+                <small>same at every edge</small>
+              </div>
+              <Slider control="Du1" label="U diffusion" min={0} max={1} step={0.001} value={recipe.controls.Du1} onChange={handleUniformControlChange} />
+              <Slider control="Dv1" label="V diffusion" min={0} max={1} step={0.001} value={recipe.controls.Dv1} onChange={handleUniformControlChange} />
+            </section>
+          </div>
+        )}
       </details>
     </main>
   )

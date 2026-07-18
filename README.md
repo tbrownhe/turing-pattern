@@ -14,8 +14,10 @@ that experiment into a deliberately small, self-hosted web application.
 - Curated pattern families plus named, versioned recipes containing the exact seed,
   controls, and engine version.
 - URL and local restoration, copy-link sharing, and strict JSON recipe import/export.
-- Pause, deterministic restart, random seed, state-only perturbation, reconnect, and
-  leak-free canvas rendering.
+- Pause, one-iteration step, deterministic restart, random seed, state-only
+  perturbation, reconnect, and leak-free canvas rendering.
+- Bounded recipe undo/redo and one-frame before/after comparison.
+- Display-only preview zoom and contrast that never alter the saved numerical recipe.
 - A bounded PNG endpoint at `POST /api/v1/generate` for the current fixed-size
   export. The full queued high-resolution workflow is still on the roadmap.
 - Strict versioned inputs, WebSocket origin checks, a shared compute limit, and
@@ -126,7 +128,9 @@ The browser opens `/ws` and first sends protocol version 1:
 }
 ```
 
-Subsequent message types are `controls`, `pause`, `resume`, `reset`, and `perturb`.
+Subsequent message types are `controls`, `pause`, `resume`, `step`, `reset`, and
+`perturb`. A `step` advances exactly one numerical iteration and leaves the session
+paused; clients cannot supply an iteration count.
 Unknown fields, non-finite values, and values outside the documented schema are
 rejected. Clients cannot choose simulation allocation size. The server's `ready`
 message identifies the engine version recorded by the recipe UI.

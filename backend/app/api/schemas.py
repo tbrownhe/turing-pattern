@@ -59,13 +59,18 @@ class ResumeMessage(StrictModel):
     type: Literal["resume"]
 
 
+class StepMessage(StrictModel):
+    type: Literal["step"]
+
+
 ClientMessage = Annotated[
     StartMessage
     | ControlsMessage
     | ResetMessage
     | PerturbMessage
     | PauseMessage
-    | ResumeMessage,
+    | ResumeMessage
+    | StepMessage,
     Field(discriminator="type"),
 ]
 client_message_adapter: TypeAdapter[ClientMessage] = TypeAdapter(ClientMessage)

@@ -26,6 +26,7 @@ from app.api.schemas import (
     ResetMessage,
     ResumeMessage,
     StartMessage,
+    StepMessage,
     parse_client_message,
 )
 from app.config import Settings, settings
@@ -342,6 +343,7 @@ def create_app(config: Settings = settings) -> FastAPI:
                 initial.seed,
             )
             simulation_lock = asyncio.Lock()
+            send_lock = asyncio.Lock()
             running = asyncio.Event()
             running.set()
             last_activity = monotonic()
@@ -371,6 +373,18 @@ def create_app(config: Settings = settings) -> FastAPI:
                         continue
                     if isinstance(message, ResumeMessage):
                         running.set()
+                        continue
+                    if isinstance(message, StepMessage):
+                        running.clear()
+                        async with simulation_lock:
+                            frame = await runtime.run(_encode_preview, simulator, 1)
+                        runtime.metrics.observe_frame(
+                            frame.step_seconds,
+                            frame.encode_seconds,
+                            len(frame.content),
+                        )
+                        async with send_lock:
+                            await websocket.send_bytes(frame.content)
                         continue
 
                     async with simulation_lock:
@@ -408,7 +422,8 @@ def create_app(config: Settings = settings) -> FastAPI:
                     runtime.metrics.observe_frame(
                         frame.step_seconds, frame.encode_seconds, len(frame.content)
                     )
-                    await websocket.send_bytes(frame.content)
+                    async with send_lock:
+                        await websocket.send_bytes(frame.content)
                     delay = frame_interval - (monotonic() - frame_started)
                     if delay > 0:
                         await asyncio.sleep(delay)

@@ -97,6 +97,25 @@ def test_websocket_starts_and_produces_a_png_frame(client):
     assert frame.startswith(b"\x89PNG\r\n\x1a\n")
 
 
+def test_websocket_can_advance_one_iteration_while_paused(client):
+    with client.websocket_connect("/ws", headers={"origin": ORIGIN}) as websocket:
+        websocket.send_json(
+            {
+                "type": "start",
+                "protocol_version": 1,
+                "controls": CONTROLS,
+                "seed": 7,
+            }
+        )
+        assert websocket.receive_json()["type"] == "ready"
+        websocket.receive_bytes()
+        websocket.send_json({"type": "pause"})
+        websocket.send_json({"type": "step"})
+        stepped_frame = websocket.receive_bytes()
+
+    assert stepped_frame.startswith(b"\x89PNG\r\n\x1a\n")
+
+
 def test_websocket_rejects_excess_sessions_without_queueing(client):
     start = {
         "type": "start",
