@@ -86,4 +86,7 @@ The 0.11% throughput difference is noise, while removing ten unused native threa
 makes two-worker resource behavior much more predictable. Production therefore sets
 `OPENBLAS_NUM_THREADS=1` and `OMP_NUM_THREADS=1`. At 416 iterations/second, 25
 steps plus encoding take about 66.7 ms, so one session has headroom beneath the
-10 FPS cap. Two-session behavior still requires the deployed load test below.
+10 FPS cap. The deployed Compose load probe subsequently exercised two clients, one
+excess client, concurrent renders, and disconnect churn through the Nginx `/api`
+route without uncovering an admission or health-response failure. The conservative
+two-job limit remains in place; this validation is not a reason to raise it.

@@ -92,6 +92,7 @@ def test_websocket_starts_and_produces_a_png_frame(client):
         websocket.send_json({"type": "pause"})
 
     assert ready["type"] == "ready"
+    assert ready["engine_version"] == "2.0.0"
     assert ready["preview_size"] == 8
     assert frame.startswith(b"\x89PNG\r\n\x1a\n")
 

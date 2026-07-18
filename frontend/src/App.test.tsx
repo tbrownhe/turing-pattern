@@ -3,6 +3,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
+import { RECIPE_STORAGE_KEY, recipeForPreset, serializeRecipe } from './recipe'
 
 
 class MockWebSocket {
@@ -44,6 +45,8 @@ describe('live controls', () => {
     vi.useFakeTimers()
     MockWebSocket.instances = []
     vi.stubGlobal('WebSocket', MockWebSocket)
+    window.localStorage.clear()
+    window.history.replaceState(null, '', '/')
   })
 
   afterEach(() => {
@@ -56,6 +59,7 @@ describe('live controls', () => {
     render(<App />)
     const websocket = MockWebSocket.instances[0]
     act(() => websocket.open())
+    fireEvent.click(screen.getByText('Advanced chemistry'))
 
     fireEvent.change(screen.getByRole('slider', { name: /Feed.*left/ }), {
       target: { value: '0.051' },
@@ -74,6 +78,7 @@ describe('live controls', () => {
     const { unmount } = render(<App />)
     const websocket = MockWebSocket.instances[0]
     act(() => websocket.open())
+    fireEvent.click(screen.getByText('Advanced chemistry'))
 
     fireEvent.change(screen.getByRole('slider', { name: /Feed.*left/ }), {
       target: { value: '0.052' },
@@ -107,5 +112,71 @@ describe('live controls', () => {
 
     expect(screen.getByText('Try later.')).toBeTruthy()
     expect(MockWebSocket.instances).toHaveLength(1)
+  })
+
+  it('restores a saved recipe before starting the socket', () => {
+    const saved = recipeForPreset('maze', 12345)
+    window.localStorage.setItem(RECIPE_STORAGE_KEY, serializeRecipe(saved))
+
+    render(<App />)
+    const websocket = MockWebSocket.instances[0]
+    act(() => websocket.open())
+
+    expect(JSON.parse(websocket.sent[0])).toEqual({
+      type: 'start',
+      protocol_version: 1,
+      controls: saved.controls,
+      seed: 12345,
+    })
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Slow maze')
+  })
+
+  it('applies a preset as controls followed by a deterministic reset', () => {
+    render(<App />)
+    const websocket = MockWebSocket.instances[0]
+    act(() => websocket.open())
+
+    fireEvent.change(screen.getByLabelText('Pattern family'), {
+      target: { value: 'coral' },
+    })
+
+    const messages = websocket.sent.map((raw) => JSON.parse(raw))
+    expect(messages.at(-2)).toEqual({
+      type: 'controls',
+      controls: recipeForPreset('coral').controls,
+    })
+    expect(messages.at(-1)).toEqual({ type: 'reset', seed: 0 })
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Branching coral')
+  })
+
+  it('applies an exact seed and records it in the share URL', async () => {
+    render(<App />)
+    const websocket = MockWebSocket.instances[0]
+    act(() => {
+      websocket.open()
+      websocket.onmessage?.(
+        new MessageEvent('message', {
+          data: JSON.stringify({
+            type: 'ready',
+            protocol_version: 1,
+            engine_version: '2.0.0',
+            preview_size: 256,
+            frame_rate: 10,
+          }),
+        }),
+      )
+    })
+
+    fireEvent.change(screen.getByLabelText('Seed'), {
+      target: { value: '424242' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
+
+    expect(JSON.parse(websocket.sent.at(-1) ?? '{}')).toEqual({
+      type: 'reset',
+      seed: 424242,
+    })
+    await act(() => vi.advanceTimersByTimeAsync(100))
+    expect(decodeURIComponent(window.location.search)).toContain('424242')
   })
 })

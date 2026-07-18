@@ -1,12 +1,31 @@
-import { useEffect, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+} from 'react'
 import './App.css'
 import {
   controlsMessage,
-  DEFAULT_CONTROLS,
   updateControl,
   type ControlKey,
   type Controls,
 } from './protocol'
+import {
+  CURRENT_ENGINE_VERSION,
+  PRESETS,
+  RECIPE_STORAGE_KEY,
+  loadInitialRecipe,
+  parseRecipeJson,
+  recipeFilename,
+  recipeForPreset,
+  recipeUrl,
+  serializeRecipe,
+  type PatternRecipe,
+  type PresetId,
+} from './recipe'
 
 type ConnectionState =
   | 'connecting'
@@ -21,6 +40,7 @@ type ServerMessage =
   | {
       type: 'ready'
       protocol_version: 1
+      engine_version?: string
       preview_size: number
       frame_rate: number
     }
@@ -67,8 +87,23 @@ function Slider({ control, label, min, max, step, value, onChange }: SliderProps
   )
 }
 
+function loadRecipeForApp() {
+  try {
+    return loadInitialRecipe(window.location.search, window.localStorage)
+  } catch {
+    return loadInitialRecipe(window.location.search)
+  }
+}
+
 function App() {
-  const [controls, setControls] = useState<Controls>(DEFAULT_CONTROLS)
+  const [loadedRecipe] = useState(loadRecipeForApp)
+  const [recipe, setRecipe] = useState<PatternRecipe>(loadedRecipe.recipe)
+  const [recipeName, setRecipeName] = useState(loadedRecipe.recipe.name)
+  const [seedDraft, setSeedDraft] = useState(String(loadedRecipe.recipe.seed))
+  const [recipeNotice, setRecipeNotice] = useState(loadedRecipe.warning)
+  const [engineVersion, setEngineVersion] = useState(
+    loadedRecipe.recipe.engine_version,
+  )
   const [connectionState, setConnectionState] =
     useState<ConnectionState>('connecting')
   const [statusDetail, setStatusDetail] = useState('')
@@ -78,32 +113,87 @@ function App() {
   const [userPaused, setUserPaused] = useState(false)
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const importRef = useRef<HTMLInputElement | null>(null)
   const socketRef = useRef<WebSocket | null>(null)
-  const controlsRef = useRef<Controls>(DEFAULT_CONTROLS)
+  const recipeRef = useRef<PatternRecipe>(loadedRecipe.recipe)
   const controlsTimerRef = useRef<number | null>(null)
-  const seedRef = useRef(0)
   const pausedRef = useRef(false)
   const latestFrameRef = useRef(0)
+  const engineVersionRef = useRef(loadedRecipe.recipe.engine_version)
 
-  const send = (message: object) => {
+  const send = useCallback((message: object) => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify(message))
     }
-  }
+  }, [])
+
+  const commitRecipe = useCallback((nextRecipe: PatternRecipe) => {
+    recipeRef.current = nextRecipe
+    setRecipe(nextRecipe)
+    setRecipeName(nextRecipe.name)
+    setSeedDraft(String(nextRecipe.seed))
+  }, [])
+
+  const clearQueuedControls = useCallback(() => {
+    if (controlsTimerRef.current !== null) {
+      window.clearTimeout(controlsTimerRef.current)
+      controlsTimerRef.current = null
+    }
+  }, [])
+
+  const applyRecipe = useCallback(
+    (nextRecipe: PatternRecipe, notice?: string) => {
+      clearQueuedControls()
+      const normalized = {
+        ...nextRecipe,
+        engine_version: engineVersionRef.current,
+        controls: { ...nextRecipe.controls },
+      }
+      commitRecipe(normalized)
+      send(controlsMessage(normalized.controls))
+      send({ type: 'reset', seed: normalized.seed })
+      if (notice) setRecipeNotice(notice)
+    },
+    [clearQueuedControls, commitRecipe, send],
+  )
 
   const queueControls = (nextControls: Controls) => {
-    controlsRef.current = nextControls
-    setControls(nextControls)
+    const nextRecipe: PatternRecipe = {
+      ...recipeRef.current,
+      engine_version: engineVersionRef.current,
+      preset: 'custom',
+      controls: nextControls,
+    }
+    commitRecipe(nextRecipe)
     if (controlsTimerRef.current !== null) return
 
     controlsTimerRef.current = window.setTimeout(() => {
       controlsTimerRef.current = null
-      send(controlsMessage(controlsRef.current))
+      send(controlsMessage(recipeRef.current.controls))
     }, 50)
   }
 
   const handleControlChange = (key: ControlKey, value: number) => {
-    queueControls(updateControl(controlsRef.current, key, value))
+    queueControls(updateControl(recipeRef.current.controls, key, value))
+  }
+
+  const selectPreset = (presetId: PresetId) => {
+    applyRecipe(
+      recipeForPreset(presetId, recipeRef.current.seed, engineVersionRef.current),
+      'Preset applied and restarted from the current seed.',
+    )
+  }
+
+  const makeUniform = () => {
+    const current = recipeRef.current.controls
+    queueControls({
+      ...current,
+      F2: current.F1,
+      K2: current.K1,
+      Du2: current.Du1,
+      Dv2: current.Dv1,
+    })
+    setRecipeNotice('Edge gradients removed. The current simulation keeps evolving.')
   }
 
   const togglePaused = () => {
@@ -114,13 +204,88 @@ function App() {
     setConnectionState(nextPaused ? 'paused' : 'live')
   }
 
-  const reset = () => {
-    const seed = crypto.getRandomValues(new Uint32Array(1))[0]
-    seedRef.current = seed
-    send({ type: 'reset', seed })
+  const restartCurrentSeed = () => {
+    send({ type: 'reset', seed: recipeRef.current.seed })
+    setRecipeNotice(`Restarted deterministically with seed ${recipeRef.current.seed}.`)
   }
 
-  const perturb = () => send({ type: 'perturb', noise: 0.25 })
+  const applySeed = (event: FormEvent) => {
+    event.preventDefault()
+    const seed = Number(seedDraft)
+    if (!Number.isInteger(seed) || seed < 0 || seed > 4_294_967_295) {
+      setRecipeNotice('Seed must be a whole number from 0 through 4294967295.')
+      return
+    }
+    const nextRecipe = { ...recipeRef.current, seed }
+    commitRecipe(nextRecipe)
+    send({ type: 'reset', seed })
+    setRecipeNotice(`Restarted with seed ${seed}.`)
+  }
+
+  const randomSeed = () => {
+    const seed = crypto.getRandomValues(new Uint32Array(1))[0]
+    const nextRecipe = { ...recipeRef.current, seed }
+    commitRecipe(nextRecipe)
+    send({ type: 'reset', seed })
+    setRecipeNotice(`New random seed: ${seed}.`)
+  }
+
+  const perturb = () => {
+    send({ type: 'perturb', noise: 0.25 })
+    setRecipeNotice('Added noise to the current state without changing its recipe.')
+  }
+
+  const saveRecipeName = () => {
+    const name = recipeName.trim()
+    if (!name) {
+      setRecipeName(recipeRef.current.name)
+      setRecipeNotice('Recipe names cannot be empty.')
+      return
+    }
+    commitRecipe({ ...recipeRef.current, name: name.slice(0, 80) })
+  }
+
+  const copyRecipeLink = async () => {
+    const url = recipeUrl(recipeRef.current, window.location.href)
+    try {
+      await navigator.clipboard.writeText(url)
+      setRecipeNotice('Share link copied to the clipboard.')
+    } catch {
+      setRecipeNotice('Clipboard access was unavailable. The address bar still contains the recipe link.')
+    }
+  }
+
+  const exportRecipe = () => {
+    const blob = new Blob([`${serializeRecipe(recipeRef.current)}\n`], {
+      type: 'application/json',
+    })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = recipeFilename(recipeRef.current)
+    anchor.click()
+    URL.revokeObjectURL(url)
+    setRecipeNotice('Recipe JSON downloaded.')
+  }
+
+  const importRecipe = async (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget
+    const file = input.files?.[0]
+    input.value = ''
+    if (!file) return
+    try {
+      const imported = parseRecipeJson(await file.text())
+      const versionNote =
+        imported.engine_version === engineVersionRef.current
+          ? 'Recipe imported and restarted.'
+          : `Recipe imported from engine ${imported.engine_version} and loaded with ${engineVersionRef.current}.`
+      applyRecipe(imported, versionNote)
+    } catch (error) {
+      setRecipeNotice(
+        error instanceof Error ? `Import failed: ${error.message}` : 'Recipe import failed.',
+      )
+    }
+  }
 
   const downloadPreview = () => {
     const canvas = canvasRef.current
@@ -130,11 +295,27 @@ function App() {
       const url = URL.createObjectURL(blob)
       const anchor = document.createElement('a')
       anchor.href = url
-      anchor.download = `turing-preview-${canvas.width}x${canvas.height}.png`
+      anchor.download = `turing-preview-${canvas.width}x${canvas.height}-seed-${recipeRef.current.seed}.png`
       anchor.click()
       URL.revokeObjectURL(url)
     }, 'image/png')
   }
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        window.localStorage.setItem(RECIPE_STORAGE_KEY, serializeRecipe(recipe))
+      } catch {
+        // A private browsing policy may disable storage; the URL remains the fallback.
+      }
+      try {
+        window.history.replaceState(null, '', recipeUrl(recipe, window.location.href))
+      } catch {
+        // Persistence should never interrupt a live session.
+      }
+    }, 100)
+    return () => window.clearTimeout(timer)
+  }, [recipe])
 
   useEffect(() => {
     let disposed = false
@@ -158,8 +339,8 @@ function App() {
           JSON.stringify({
             type: 'start',
             protocol_version: 1,
-            controls: controlsRef.current,
-            seed: seedRef.current,
+            controls: recipeRef.current.controls,
+            seed: recipeRef.current.seed,
           }),
         )
       }
@@ -178,8 +359,24 @@ function App() {
           }
 
           if (message.type === 'ready') {
+            const readyEngineVersion =
+              message.engine_version ?? CURRENT_ENGINE_VERSION
             setPreviewSize(message.preview_size)
             setConnectionState(pausedRef.current ? 'paused' : 'live')
+            engineVersionRef.current = readyEngineVersion
+            setEngineVersion(readyEngineVersion)
+            if (recipeRef.current.engine_version !== readyEngineVersion) {
+              const previousVersion = recipeRef.current.engine_version
+              commitRecipe({
+                ...recipeRef.current,
+                engine_version: readyEngineVersion,
+              })
+              if (previousVersion !== CURRENT_ENGINE_VERSION) {
+                setRecipeNotice(
+                  `This recipe was created with engine ${previousVersion}; the current server uses ${readyEngineVersion}.`,
+                )
+              }
+            }
             if (pausedRef.current || document.hidden) {
               websocket.send(JSON.stringify({ type: 'pause' }))
             }
@@ -236,11 +433,8 @@ function App() {
     }
 
     const handleVisibilityChange = () => {
-      if (document.hidden) {
-        send({ type: 'pause' })
-      } else if (!pausedRef.current) {
-        send({ type: 'resume' })
-      }
+      if (document.hidden) send({ type: 'pause' })
+      else if (!pausedRef.current) send({ type: 'resume' })
     }
 
     document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -251,21 +445,24 @@ function App() {
       terminalError = true
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer)
-      if (controlsTimerRef.current !== null) {
-        window.clearTimeout(controlsTimerRef.current)
-        controlsTimerRef.current = null
-      }
+      clearQueuedControls()
       latestFrameRef.current += 1
       socketRef.current?.close(1000, 'Page closed')
       socketRef.current = null
     }
-  }, [reconnectKey])
+  }, [clearQueuedControls, commitRecipe, reconnectKey, send])
 
   const canControl = connectionState === 'live' || connectionState === 'paused'
   const canReconnect =
     connectionState === 'busy' ||
     connectionState === 'timed-out' ||
     connectionState === 'failed'
+  const selectedPreset = PRESETS.find((preset) => preset.id === recipe.preset)
+  const hasGradient =
+    recipe.controls.F1 !== recipe.controls.F2 ||
+    recipe.controls.K1 !== recipe.controls.K2 ||
+    recipe.controls.Du1 !== recipe.controls.Du2 ||
+    recipe.controls.Dv1 !== recipe.controls.Dv2
 
   return (
     <main className="app-shell">
@@ -273,7 +470,7 @@ function App() {
         <p className="eyebrow">Reaction + diffusion</p>
         <h1>Gray-Scott Pattern Lab</h1>
         <p className="intro">
-          Tune the chemistry at each edge and watch order emerge from noise.
+          Start with a pattern family, find a beautiful accident, and keep its exact recipe.
         </p>
       </header>
 
@@ -284,22 +481,88 @@ function App() {
           {statusDetail && <p>{statusDetail}</p>}
         </div>
         {canReconnect && (
-          <button className="button button-small" onClick={() => setReconnectKey((v) => v + 1)}>
+          <button className="button button-small" onClick={() => setReconnectKey((value) => value + 1)}>
             Try again
           </button>
         )}
       </section>
 
-      <section className="lab" aria-label="Pattern controls and live preview">
-        <aside className="control-panel">
+      <section className="lab" aria-label="Pattern recipe and live preview">
+        <aside className="control-panel basic-panel">
           <div className="panel-heading">
-            <span>Horizontal chemistry</span>
-            <small>left → right</small>
+            <span>Recipe</span>
+            <small>version 1</small>
           </div>
-          <Slider control="F1" label="Feed · left" min={0} max={0.1} step={0.001} value={controls.F1} onChange={handleControlChange} />
-          <Slider control="F2" label="Feed · right" min={0} max={0.1} step={0.001} value={controls.F2} onChange={handleControlChange} />
-          <Slider control="K1" label="Kill · left" min={0} max={0.1} step={0.001} value={controls.K1} onChange={handleControlChange} />
-          <Slider control="K2" label="Kill · right" min={0} max={0.1} step={0.001} value={controls.K2} onChange={handleControlChange} />
+
+          <label className="field-label" htmlFor="recipe-name">Name</label>
+          <input
+            id="recipe-name"
+            className="text-input"
+            maxLength={80}
+            value={recipeName}
+            onChange={(event) => setRecipeName(event.target.value)}
+            onBlur={saveRecipeName}
+          />
+
+          <label className="field-label" htmlFor="pattern-preset">Pattern family</label>
+          <select
+            id="pattern-preset"
+            className="select-input"
+            value={recipe.preset}
+            onChange={(event) => {
+              if (event.target.value !== 'custom') selectPreset(event.target.value as PresetId)
+            }}
+          >
+            {PRESETS.map((preset) => (
+              <option key={preset.id} value={preset.id}>{preset.name}</option>
+            ))}
+            <option value="custom">Custom recipe</option>
+          </select>
+          <p className="field-help">
+            {selectedPreset?.description ?? 'Your own blend of feed, kill, and diffusion values.'}
+          </p>
+
+          <form className="seed-form" onSubmit={applySeed}>
+            <label className="field-label" htmlFor="recipe-seed">Seed</label>
+            <div className="input-action-row">
+              <input
+                id="recipe-seed"
+                className="text-input numeric-input"
+                type="number"
+                min={0}
+                max={4_294_967_295}
+                step={1}
+                value={seedDraft}
+                onChange={(event) => setSeedDraft(event.target.value)}
+              />
+              <button className="button button-small" type="submit" disabled={!canControl}>Apply</button>
+            </div>
+          </form>
+
+          <div className="recipe-summary">
+            <span>{hasGradient ? 'Edge gradients active' : 'Uniform chemistry'}</span>
+            <small>Engine {engineVersion}</small>
+          </div>
+          {hasGradient && (
+            <button className="button button-full" onClick={makeUniform} disabled={!canControl}>
+              Make values uniform
+            </button>
+          )}
+
+          <div className="share-actions" aria-label="Recipe sharing">
+            <button className="button" onClick={copyRecipeLink}>Copy link</button>
+            <button className="button" onClick={exportRecipe}>Export JSON</button>
+            <button className="button" onClick={() => importRef.current?.click()}>Import JSON</button>
+            <input
+              ref={importRef}
+              className="visually-hidden"
+              type="file"
+              accept="application/json,.json"
+              onChange={importRecipe}
+              tabIndex={-1}
+            />
+          </div>
+          <p className="recipe-notice" aria-live="polite">{recipeNotice}</p>
         </aside>
 
         <div className="preview-column">
@@ -317,26 +580,51 @@ function App() {
             <button className="button button-primary" onClick={togglePaused} disabled={!canControl}>
               {userPaused ? 'Resume' : 'Pause'}
             </button>
-            <button className="button" onClick={reset} disabled={!canControl}>New seed</button>
-            <button className="button" onClick={perturb} disabled={!canControl}>Perturb</button>
+            <button className="button" onClick={restartCurrentSeed} disabled={!canControl}>Restart same seed</button>
+            <button className="button" onClick={randomSeed} disabled={!canControl}>Random seed</button>
+            <button className="button" onClick={perturb} disabled={!canControl}>Perturb state</button>
             <button className="button" onClick={downloadPreview} disabled={!hasFrame}>Download preview</button>
           </div>
           <p className="preview-note">
-            Preview: {previewSize} × {previewSize}px. High-resolution rendering comes after the safety foundation.
+            Preview: {previewSize} × {previewSize}px. Control changes evolve the current state;
+            presets and seed changes restart it. Perturbation changes the state, not the saved recipe.
           </p>
         </div>
-
-        <aside className="control-panel">
-          <div className="panel-heading">
-            <span>Vertical diffusion</span>
-            <small>top → bottom</small>
-          </div>
-          <Slider control="Du1" label="U diffusion · top" min={0} max={1} step={0.001} value={controls.Du1} onChange={handleControlChange} />
-          <Slider control="Du2" label="U diffusion · bottom" min={0} max={1} step={0.001} value={controls.Du2} onChange={handleControlChange} />
-          <Slider control="Dv1" label="V diffusion · top" min={0} max={1} step={0.001} value={controls.Dv1} onChange={handleControlChange} />
-          <Slider control="Dv2" label="V diffusion · bottom" min={0} max={1} step={0.001} value={controls.Dv2} onChange={handleControlChange} />
-        </aside>
       </section>
+
+      <details className="advanced-panel">
+        <summary>
+          <span>Advanced chemistry</span>
+          <small>Exact Gray-Scott controls</small>
+        </summary>
+        <p className="advanced-intro">
+          Feed and kill shape the reaction. U and V diffusion control how quickly each
+          concentration spreads. Different endpoint values create a gradient across the image.
+        </p>
+        <div className="advanced-grid">
+          <section className="control-panel">
+            <div className="panel-heading">
+              <span>Horizontal reaction</span>
+              <small>left → right</small>
+            </div>
+            <Slider control="F1" label="Feed · left edge" min={0} max={0.1} step={0.001} value={recipe.controls.F1} onChange={handleControlChange} />
+            <Slider control="F2" label="Feed · right edge" min={0} max={0.1} step={0.001} value={recipe.controls.F2} onChange={handleControlChange} />
+            <Slider control="K1" label="Kill · left edge" min={0} max={0.1} step={0.001} value={recipe.controls.K1} onChange={handleControlChange} />
+            <Slider control="K2" label="Kill · right edge" min={0} max={0.1} step={0.001} value={recipe.controls.K2} onChange={handleControlChange} />
+          </section>
+
+          <section className="control-panel">
+            <div className="panel-heading">
+              <span>Vertical diffusion</span>
+              <small>top → bottom</small>
+            </div>
+            <Slider control="Du1" label="U diffusion · top edge" min={0} max={1} step={0.001} value={recipe.controls.Du1} onChange={handleControlChange} />
+            <Slider control="Du2" label="U diffusion · bottom edge" min={0} max={1} step={0.001} value={recipe.controls.Du2} onChange={handleControlChange} />
+            <Slider control="Dv1" label="V diffusion · top edge" min={0} max={1} step={0.001} value={recipe.controls.Dv1} onChange={handleControlChange} />
+            <Slider control="Dv2" label="V diffusion · bottom edge" min={0} max={1} step={0.001} value={recipe.controls.Dv2} onChange={handleControlChange} />
+          </section>
+        </div>
+      </details>
     </main>
   )
 }

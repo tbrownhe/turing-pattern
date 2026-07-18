@@ -350,6 +350,7 @@ def create_app(config: Settings = settings) -> FastAPI:
                 {
                     "type": "ready",
                     "protocol_version": 1,
+                    "engine_version": ENGINE_VERSION,
                     "session_id": session_id,
                     "preview_size": config.preview_size,
                     "frame_rate": config.frame_rate,

@@ -11,7 +11,11 @@ that experiment into a deliberately small, self-hosted web application.
 
 - A live 256×256 simulation with horizontal feed/kill gradients and vertical
   diffusion gradients.
-- Pause, deterministic reset, perturb, reconnect, and leak-free canvas rendering.
+- Curated pattern families plus named, versioned recipes containing the exact seed,
+  controls, and engine version.
+- URL and local restoration, copy-link sharing, and strict JSON recipe import/export.
+- Pause, deterministic restart, random seed, state-only perturbation, reconnect, and
+  leak-free canvas rendering.
 - A bounded PNG endpoint at `POST /api/v1/generate` for the current fixed-size
   export. The full queued high-resolution workflow is still on the roadmap.
 - Strict versioned inputs, WebSocket origin checks, a shared compute limit, and
@@ -68,6 +72,38 @@ type checking and tests plus frontend audit, tests, lint and build. See
 The first run also downloads Playwright's pinned Chromium build for the real-browser
 live-frame smoke test.
 
+## Live Lab recipes
+
+The basic panel starts from mixed, spots, worms, coral, or maze families and keeps
+the exact numerical controls in the Advanced panel. A recipe contains only compact,
+validated metadata—never the evolving concentration arrays:
+
+```json
+{
+  "recipe_version": 1,
+  "engine_version": "2.0.0",
+  "name": "Branching coral",
+  "preset": "coral",
+  "seed": 42,
+  "controls": {
+    "F1": 0.054,
+    "F2": 0.058,
+    "K1": 0.061,
+    "K2": 0.064,
+    "Du1": 0.74,
+    "Du2": 0.66,
+    "Dv1": 0.27,
+    "Dv2": 0.23
+  }
+}
+```
+
+Shared URL recipes take precedence over the last recipe in local storage. Imported
+JSON is rejected if it has unknown fields, an unsupported version, unsafe values,
+or an invalid seed. Changing a raw control evolves the current state; applying a
+preset or seed restarts deterministically. Perturbation intentionally changes only
+the current state and therefore does not alter the saved recipe.
+
 ## Public protocol
 
 The browser opens `/ws` and first sends protocol version 1:
@@ -92,7 +128,8 @@ The browser opens `/ws` and first sends protocol version 1:
 
 Subsequent message types are `controls`, `pause`, `resume`, `reset`, and `perturb`.
 Unknown fields, non-finite values, and values outside the documented schema are
-rejected. Clients cannot choose simulation allocation size.
+rejected. Clients cannot choose simulation allocation size. The server's `ready`
+message identifies the engine version recorded by the recipe UI.
 
 The fixed-size PNG endpoint accepts the same controls and a seed:
 

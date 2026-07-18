@@ -13,6 +13,7 @@ test('a visitor receives a live frame and can tune a control', async ({ page }) 
     timeout: 15_000,
   })
 
+  await page.getByText('Advanced chemistry').click()
   const feed = page.getByRole('slider', { name: /Feed.*left/ })
   await feed.fill('0.051')
   await expect(page.getByText('0.0510')).toBeVisible()

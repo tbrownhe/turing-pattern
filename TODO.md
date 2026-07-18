@@ -192,10 +192,9 @@ Done when:
 P1's server-side foundation is complete on the `overhaul` branch: the shared
 seeded engine, measured CPU optimization, numerical/API/UI tests, load tooling,
 CI gates, hash locks, non-root/read-only containers, structured logs, metrics, and
-operations notes are in place. The single-session production OptiPlex baseline is
-recorded. Its concurrent/browser measurements and the WebGL/WASM prototype remain
-deliberately open in P1.2; concurrency stays at two until those measurements are
-recorded in `BENCHMARK.md`.
+operations notes are in place. The production OptiPlex engine baseline and deployed
+capacity probe are recorded. Browser-side preview work is deliberately separated
+into P2.4 so it can be explored and taught without obscuring the stable fallback.
 
 ### [x] P1.1 Separate the numerical engine from transport and files
 
@@ -223,11 +222,12 @@ Done when:
   collapse/non-finite handling, normalization, and metadata round-tripping.
 - Batch, API render, and live preview call the same tested stepping primitives.
 
-### [ ] P1.2 Benchmark before optimizing the engine
+### [x] P1.2 Benchmark before optimizing the engine
 
 CPU benchmark/refactor work is complete with workstation and production OptiPlex
-data in `BENCHMARK.md`. This stays open for the deployed concurrent/browser baseline
-and the intentionally deferred WebGL/WASM prototype.
+data in `BENCHMARK.md`. The deployed load probe also validates the conservative
+two-job capacity policy. Browser decode/paint measurements and a browser-side engine
+are product-performance work in P2.3 and P2.4, not unfinished CPU optimization.
 
 - Add a benchmark script that records CPU model, NumPy backend/thread count, grid,
   dtype, iterations/second, frame-encoding time, frame bytes, peak RSS, and concurrent
@@ -235,23 +235,18 @@ and the intentionally deferred WebGL/WASM prototype.
 - Compare `float32` with `float64`; broadcasting four 1-D control vectors with the
   current repeated 2-D maps; and a preallocated/convolution or compiled Laplacian
   with the current nested `np.roll` implementation.
-- Benchmark the whole frame path, not only reaction math: step, normalize, encode,
-  send, browser decode, and paint.
-- Test a lower/adaptive preview frame rate and dynamic steps-per-frame. Dropping an
-  old preview frame is better than accumulating latency.
 - Verify which BLAS NumPy actually uses. Remove the `mkl` package unless the shipped
   NumPy is demonstrably linked to and helped by it. Consider eliminating SciPy if
   small NumPy/Pillow replacements for interpolation and output resizing are faster
   and simpler.
-- Prototype browser-side WebGL2 first, with WebGPU as an optional faster path. Compare
-  visual output against numerical fixtures before making it the default.
 
 Done when:
 
 - A written benchmark chooses preview resolution, FPS, server concurrency, dtype,
   and worker/container limits for this exact host.
 - Optimization changes include before/after time, memory, and output-difference data.
-- The UI favors low input latency; it never queues stale frames to preserve FPS.
+- The configured capacity probe rejects excess work while health traffic remains
+  responsive and admitted sessions continue producing frames.
 
 ### [x] P1.3 Add the safety net
 
@@ -324,10 +319,21 @@ Done when:
 
 ### [ ] P2.1 Design two clear modes: Live Lab and High-Resolution Render
 
-**Live Lab**
+#### [x] P2.1a Build reproducible Live Lab recipes
 
-- Show a pattern immediately with curated presets (spots, worms, coral/maze, mixed
-  gradients) and a plain-language explanation of each control.
+- A strict versioned recipe records its name, preset, seed, engine version, and every
+  numerical control without storing simulation arrays.
+- Curated mixed, spots, worms, coral, and maze starting points include plain-language
+  descriptions.
+- Share URLs take precedence over validated local storage. Copy-link and strict JSON
+  import/export make recipes portable.
+- Basic recipe and seed controls are separated from the exact endpoint chemistry in
+  a collapsible Advanced panel.
+- Deterministic restart, random seed, and state-only perturbation are distinct actions.
+- Frontend tests cover validation, serialization, restoration, presets, and resets.
+
+#### [ ] P2.1b Finish the Live Lab interaction design
+
 - Start with basic controls: preset, scale, variation/seed, and contrast. Put raw
   `F`, `k`, `Du`, `Dv`, endpoint gradients, and numerical details in an Advanced
   panel.
@@ -336,13 +342,11 @@ Done when:
   they affect.
 - Add reset, pause, single-step, perturb, deterministic reseed, random seed, undo/redo,
   and before/after comparison.
-- Persist parameters and seed in the URL and local storage. Add copy-link, JSON import/
-  export, and preset naming. Never put large simulation state in the URL.
 - Build a responsive layout that works on phone, keyboard, touch, zoom, and screen
   readers. Use real labels, visible focus, sufficient contrast, and reduced-motion
   behavior.
 
-**High-Resolution Render**
+#### [ ] P2.1c Design the High-Resolution Render experience
 
 - Show simulation resolution separately from output resolution: bicubic enlargement
   creates more pixels but not more pattern detail.
@@ -400,6 +404,29 @@ here rather than guessing from a development machine. Initial targets to validat
 - render progress changes often enough that a user can tell it is alive;
 - worst-case valid render stays below 70% of the container memory limit, leaving
   recovery headroom.
+
+### [ ] P2.4 Prototype browser-side live simulation (WebGL/WASM learning pass)
+
+- Start with a small numerical kernel and fixture comparison. Document how memory,
+  typed arrays, JavaScript/WASM boundaries, and rendering fit together before
+  changing the production UI.
+- Prototype WebGL2 as the broadly available GPU baseline. Evaluate WASM for CPU
+  portability and orchestration, and WebGPU only as an optional faster path.
+- Benchmark the whole browser frame path: step, normalize, upload/draw, input latency,
+  memory growth, and behavior in background tabs.
+- Compare representative concentration maps and visual output against the existing
+  deterministic engine fixtures with an explicit tolerance.
+- Test adaptive frame rate and dynamic steps-per-frame. Drop stale preview work
+  instead of accumulating latency.
+- Keep the server WebSocket engine as a selectable fallback until representative
+  desktop and mobile browsers pass correctness, performance, and lifecycle checks.
+
+Done when:
+
+- The implementation and benchmark make the browser/server tradeoff understandable,
+  not magical, and record why a particular WebGL/WASM boundary was selected.
+- A compatibility failure falls back cleanly without losing the current recipe.
+- Making browser-side preview the default is a measured, reversible decision.
 
 ## P3 — Polish, operations, and community
 
