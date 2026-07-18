@@ -1,29 +1,65 @@
 import json
 from datetime import datetime
 
-import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image, PngImagePlugin
 from scipy.interpolate import interp1d
 from scipy.ndimage import zoom
 
 
-def initialize_grid(w: int, h: int, noise: float = 1.0) -> tuple[np.ndarray]:
-    """Seed with random noise
+class TuringSimulator:
+    def __init__(self, shape=(256, 256), **initial_params):
+        self.shape = shape
+        self.rgb = False
+        self.reset()
+        self.update_controls(initial_params)
 
-    Args:
-        w (int): Image pixel width
-        h (int): image pixel height
-        noise (float, optional): amplitude of initial noise. Defaults to 1.0.
+    def reset(self):
+        self.U = np.ones(self.shape)
+        self.V = np.zeros(self.shape)
+        self.seed()
 
-    Returns:
-        tuple[np.ndarray]: Initial map signals
-    """
-    U = np.ones((h, w))
-    V = np.zeros((h, w))
-    U += noise * (np.random.rand(h, w) - 0.5)
-    V += noise * (np.random.rand(h, w) - 0.5)
-    return U, V
+    def seed(self, noise: float = 1.0):
+        self.U += noise * (np.random.rand(*self.shape) - 0.5)
+        self.V += noise * (np.random.rand(*self.shape) - 0.5)
+
+    def update_controls(self, params):
+        self.F = np.linspace(params["F1"], params["F2"], self.shape[1])[None, :].repeat(
+            self.shape[0], axis=0
+        )
+        self.k = np.linspace(params["K1"], params["K2"], self.shape[1])[None, :].repeat(
+            self.shape[0], axis=0
+        )
+        self.Du = np.linspace(params["Du1"], params["Du2"], self.shape[0])[
+            :, None
+        ].repeat(self.shape[1], axis=1)
+        self.Dv = np.linspace(params["Dv1"], params["Dv2"], self.shape[0])[
+            :, None
+        ].repeat(self.shape[1], axis=1)
+
+    def react(self):
+        Lu, Lv = laplacian(self.U), laplacian(self.V)
+        reaction = self.U * self.V * self.V
+        self.U += self.Du * Lu - reaction + self.F * (1 - self.U)
+        self.V += self.Dv * Lv + reaction - (self.F + self.k) * self.V
+
+        # Check for invalid sim results.
+        if np.isnan(self.U).any() or np.isnan(self.V).any():
+            self.reset()
+
+    def img_norm(self, Z):
+        return (255 * (Z - Z.min()) / (Z.max() - Z.min())).astype(np.uint8)
+
+    def step(self, steps: int = 1):
+        for _ in range(steps):
+            self.react()
+
+        if self.rgb:
+            u_img = self.img_norm(self.U)
+            v_img = self.img_norm(self.V)
+            return np.stack([u_img, np.zeros_like(u_img), v_img], axis=-1)
+        else:
+            return self.img_norm(self.V)
 
 
 def laplacian(Z: np.ndarray) -> np.ndarray:
@@ -47,6 +83,24 @@ def laplacian(Z: np.ndarray) -> np.ndarray:
             + np.roll(np.roll(Z, -1, 0), -1, 1)
         )
     )
+
+
+def initialize_grid(w: int, h: int, noise: float = 1.0) -> tuple[np.ndarray]:
+    """Seed with random noise
+
+    Args:
+        w (int): Image pixel width
+        h (int): image pixel height
+        noise (float, optional): amplitude of initial noise. Defaults to 1.0.
+
+    Returns:
+        tuple[np.ndarray]: Initial map signals
+    """
+    U = np.ones((h, w))
+    V = np.zeros((h, w))
+    U += noise * (np.random.rand(h, w) - 0.5)
+    V += noise * (np.random.rand(h, w) - 0.5)
+    return U, V
 
 
 def parameter_map(
@@ -115,6 +169,7 @@ def turing_pattern(
     k_vals: list[float] = [0.056, 0.06, 0.0635, 0.0665, 0.07, 0.074],
     k_axis: str = "x",
     steps: int = 10000,
+    upsample=2,
     **kwargs,
 ) -> np.ndarray:
     """Generate turing patterns.
@@ -148,12 +203,6 @@ def turing_pattern(
     F = parameter_map(w, h, F_ctrl, F_vals, axis=F_axis)
     k = parameter_map(w, h, k_ctrl, k_vals, axis=k_axis)
 
-    # Plot setup
-    plt.ion()
-    _, ax = plt.subplots()
-    img = ax.imshow(V, cmap="gray", vmin=0, vmax=1)
-    plt.title("Gray-Scott Turing Pattern")
-
     for i in range(steps):
         # Compute diffusion
         Lu, Lv = laplacian(U), laplacian(V)
@@ -175,25 +224,20 @@ def turing_pattern(
                     f"Model collapsed by step {i}. Brightness range is to small: {ran}"
                 )
 
-            # Plot update
-            img.set_data(V)
-            img.set_clim(vmin=V.min(), vmax=V.max())
-            plt.pause(0.1)
+    # Normalize V
+    V_norm = (255 * (V - V.min()) / (V.max() - V.min())).astype(np.uint8)
 
-    # Return normalized V
-    return (255 * (V - V.min()) / (V.max() - V.min())).astype(np.uint8)
+    # Upsample image for ease of use in image editors later
+    return zoom(V_norm, upsample, order=3)
 
 
 def main():
     # Load parameters from JSON
-    with open("turing_parameters.json", "r") as f:
+    with open("core/turing_parameters.json", "r") as f:
         TuringParams = json.loads(f.read())
 
     # Generate pattern
     pattern = turing_pattern(**TuringParams)
-
-    # Upsample image for ease of use in image editors later
-    pattern = zoom(pattern, TuringParams["upsample"], order=3)
 
     # Convert to Pillow image and create metadata
     img = Image.fromarray(pattern).convert("L")

@@ -1,0 +1,6 @@
+uvicorn[standard]
+fastapi
+numpy
+scipy
+pillow
+mkl
