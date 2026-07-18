@@ -357,16 +357,24 @@ Done when:
   announcements, DOM reading order, high-contrast controls, responsive reflow for
   narrow/zoomed layouts, and the reduced-motion override.
 
-#### [ ] P2.1d Design the High-Resolution Render experience
+#### [x] P2.1d Design the High-Resolution Render experience
 
-- Show simulation resolution separately from output resolution: bicubic enlargement
-  creates more pixels but not more pattern detail.
-- Present estimated wait/resource class before submission and visible queued/running/
-  progress/cancelled/failed/expired states afterward.
-- Provide grayscale PNG first, then threshold/invert/levels, transparent blackwork,
-  palette mapping, crop/aspect ratio, and seamless tiling if users request them.
-- Preserve the exact recipe in PNG metadata and a sidecar JSON. Use a descriptive,
-  collision-resistant filename.
+- Added an authoritative iteration counter paired with each painted live frame and a
+  clear recipe handoff that treats the count as a development reference, not an
+  attempt to enlarge the live image.
+- Added a bounded fresh-run time study that captures two to six ordered checkpoints
+  from one simulation. Selecting a thumbnail sets the high-resolution termination
+  step, making early termination a first-class creative control.
+- Added physical dimensions in inches/centimetres, Draft/Studio/Fine output detail,
+  explicit feature scale, framing, and exact development steps. The validated plan
+  separates numerical and output dimensions, the 2x bicubic finish, measured time
+  range, estimated memory, resource class, and configured rejection reasons.
+- Feature scale is versioned in the plan but truthfully marked calibration-required;
+  the queue button remains disabled until P2.2 provides bounded, recoverable jobs and
+  a measured spatial-scale implementation.
+- Keep grayscale PNG first. Threshold/invert/levels, transparent blackwork, palette
+  mapping, and seamless tiling remain demand-driven follow-ups after the core job
+  path. P2.2 owns queued/running/progress/cancel/expiry states and artifact metadata.
 
 Done when:
 
@@ -378,6 +386,8 @@ Done when:
 
 ### [ ] P2.2 Implement high-resolution rendering as a bounded job system
 
+- Calibrate and version the 0.5x/1x/2x feature-scale mapping before enabling the
+  queue. Store both user-facing development steps and any derived integrator steps.
 - `POST /api/v1/renders` validates a complete recipe and returns a job ID. Add status,
   cancellation, and artifact endpoints. Initially allow one running job and a small
   finite queue; tune only from benchmark data.

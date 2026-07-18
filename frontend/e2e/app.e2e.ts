@@ -9,6 +9,9 @@ test('a visitor receives a live frame and can tune a control', async ({ page }) 
   await expect(page.getByText('Live simulation running')).toBeVisible({
     timeout: 15_000,
   })
+  await expect(page.getByLabel('Live simulation iteration')).not.toHaveText('Step 0', {
+    timeout: 15_000,
+  })
   await expect(page.getByText('Waiting for the first pattern…')).toHaveCount(0, {
     timeout: 15_000,
   })
@@ -46,6 +49,11 @@ test('a visitor receives a live frame and can tune a control', async ({ page }) 
 
   await page.getByRole('button', { name: 'Step once' }).click()
   await expect(page.getByText('Simulation paused')).toBeVisible()
+
+  await expect(page.getByRole('heading', { name: 'Plan a fresh realization' })).toBeVisible()
+  await page.getByRole('button', { name: 'Import current Live Lab settings' }).click()
+  await page.getByRole('button', { name: 'Review render plan' }).click()
+  await expect(page.getByText('1,800 × 1,800 px')).toBeVisible()
 })
 
 test('the preview remains fully visible while phone controls scroll', async ({ page }) => {

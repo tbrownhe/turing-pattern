@@ -18,6 +18,8 @@ that experiment into a deliberately small, self-hosted web application.
   perturbation, reconnect, and leak-free canvas rendering.
 - Bounded recipe undo/redo and one-frame before/after comparison.
 - Display-only preview zoom and contrast that never alter the saved numerical recipe.
+- An authoritative live iteration counter, recipe-to-render handoff, bounded
+  multi-checkpoint development time study, and physical-size render planner.
 - A bounded PNG endpoint at `POST /api/v1/generate` for the current fixed-size
   export. The full queued high-resolution workflow is still on the roadmap.
 - Strict versioned inputs, WebSocket origin checks, a shared compute limit, and
@@ -129,6 +131,30 @@ or an invalid seed. Changing a raw control evolves the current state; applying a
 preset or seed restarts deterministically. Perturbation intentionally changes only
 the current state and therefore does not alter the saved recipe.
 
+## High-resolution planning and time studies
+
+**Use these settings for a render** carries the current recipe into a fresh-run
+planner; it does not attempt to reproduce or enlarge the current live frame. The
+displayed live iteration is an authoritative count paired with the painted frame and
+is offered as a reference for the new render's development steps.
+
+The planner accepts physical dimensions in inches or centimetres, plain-language
+output detail, 0.5x/1x/2x feature scale, framing, and an exact termination step. It
+resolves those choices into output pixels, numerical grid size, the configured 2x
+bicubic finish, an OptiPlex-calibrated time range, estimated working memory, and a
+resource class. Oversized plans return specific configured-limit failures before
+expensive work begins.
+
+The optional time study runs the recipe once from its seed and captures several
+ordered 256x256 checkpoints. Selecting a checkpoint makes that early-termination
+point the render target. Time studies share the same bounded compute admission policy
+as live sessions and fixed renders.
+
+Feature scale is recorded but deliberately marked `calibration-required`. The
+high-resolution queue remains disabled until P2.2 adds its durable bounded worker and
+a measured spatial-scale model; the planner never holds a long HTTP request open while
+pretending a queue exists.
+
 ## Public protocol
 
 The browser opens `/ws` and first sends protocol version 1:
@@ -156,7 +182,10 @@ Subsequent message types are `controls`, `pause`, `resume`, `step`, `reset`, and
 paused; clients cannot supply an iteration count.
 Unknown fields, non-finite values, and values outside the documented schema are
 rejected. Clients cannot choose simulation allocation size. The server's `ready`
-message identifies the engine version recorded by the recipe UI.
+message identifies the engine version recorded by the recipe UI. Each binary PNG is
+preceded by a small `frame` message containing its frame ID and authoritative
+iteration count, so dropped browser frames cannot corrupt the displayed development
+reference.
 
 The fixed-size PNG endpoint accepts the same controls and a seed:
 
@@ -194,6 +223,9 @@ tuning variables are:
 | `TURING_IDLE_TIMEOUT_SECONDS` | `600` | Live session inactivity limit |
 | `TURING_FRAME_RATE` | `10` | Maximum server preview frames per second |
 | `TURING_STEPS_PER_FRAME` | `25` | Numerical iterations between preview frames |
+| `TURING_MAX_RENDER_SIMULATION_PIXELS` | `1048576` | Conservative numerical-grid limit used by render planning |
+| `TURING_MAX_RENDER_OUTPUT_EDGE` | `4096` | Longest planned output edge in pixels |
+| `TURING_BENCHMARK_ITERATIONS_PER_SECOND` | `421.2` | Measured 256x256 OptiPlex throughput used for time estimates |
 | `TURING_LOG_LEVEL` | `INFO` | Structured JSON log threshold |
 | `OPENBLAS_NUM_THREADS` | `1` | Native threads per compute worker |
 | `OMP_NUM_THREADS` | `1` | OpenMP threads per compute worker |

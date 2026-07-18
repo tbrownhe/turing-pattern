@@ -5,8 +5,10 @@ from pydantic import ValidationError
 
 from app.api.schemas import (
     ControlsMessage,
+    RenderPlanRequest,
     StartMessage,
     StepMessage,
+    TimeStudyRequest,
     parse_client_message,
 )
 
@@ -54,6 +56,40 @@ def test_step_message_has_no_client_controlled_work_size():
 
     with pytest.raises(ValidationError):
         parse({"type": "step", "iterations": 1_000_000})
+
+
+def test_render_plans_and_time_studies_are_strict_and_bounded():
+    plan = RenderPlanRequest.model_validate(
+        {
+            "controls": VALID_CONTROLS,
+            "seed": 42,
+            "width": 6.0,
+            "height": 6.0,
+            "unit": "in",
+            "quality": "studio",
+            "feature_scale": 1.0,
+            "development_steps": 5000,
+            "framing": "crop",
+        }
+    )
+    study = TimeStudyRequest.model_validate(
+        {"controls": VALID_CONTROLS, "seed": 42, "checkpoints": [100, 500]}
+    )
+
+    assert plan.development_steps == 5000
+    assert study.checkpoints == [100, 500]
+
+    with pytest.raises(ValidationError):
+        TimeStudyRequest.model_validate(
+            {"controls": VALID_CONTROLS, "checkpoints": [500, 100]}
+        )
+    with pytest.raises(ValidationError):
+        RenderPlanRequest.model_validate(
+            {
+                **plan.model_dump(),
+                "development_steps": 1_000_000,
+            }
+        )
 
 
 @pytest.mark.parametrize(

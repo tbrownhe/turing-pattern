@@ -31,7 +31,7 @@ def client():
         preview_size=8,
         render_size=8,
         render_steps=2,
-        render_upsample=1,
+        render_upsample=2,
         steps_per_frame=1,
         frame_rate=5,
         max_compute_jobs=1,
@@ -88,12 +88,14 @@ def test_websocket_starts_and_produces_a_png_frame(client):
             }
         )
         ready = websocket.receive_json()
+        metadata = websocket.receive_json()
         frame = websocket.receive_bytes()
         websocket.send_json({"type": "pause"})
 
     assert ready["type"] == "ready"
     assert ready["engine_version"] == "2.0.0"
     assert ready["preview_size"] == 8
+    assert metadata == {"type": "frame", "frame_id": 1, "iteration": 1}
     assert frame.startswith(b"\x89PNG\r\n\x1a\n")
 
 
@@ -108,11 +110,14 @@ def test_websocket_can_advance_one_iteration_while_paused(client):
             }
         )
         assert websocket.receive_json()["type"] == "ready"
+        assert websocket.receive_json()["iteration"] == 1
         websocket.receive_bytes()
         websocket.send_json({"type": "pause"})
         websocket.send_json({"type": "step"})
+        stepped_metadata = websocket.receive_json()
         stepped_frame = websocket.receive_bytes()
 
+    assert stepped_metadata["iteration"] == 2
     assert stepped_frame.startswith(b"\x89PNG\r\n\x1a\n")
 
 
@@ -150,6 +155,58 @@ def test_generate_is_post_only_and_validated(client):
     assert response.content.startswith(b"\x89PNG\r\n\x1a\n")
 
 
+def test_render_plan_resolves_physical_dimensions_and_rejects_oversized_work(client):
+    payload = {
+        "controls": CONTROLS,
+        "seed": 9,
+        "width": 6.0,
+        "height": 6.0,
+        "unit": "in",
+        "quality": "studio",
+        "feature_scale": 1.0,
+        "development_steps": 5000,
+        "framing": "crop",
+    }
+
+    accepted = client.post("/api/v1/render-plans", json=payload).json()
+    oversized = client.post(
+        "/api/v1/render-plans", json={**payload, "width": 12.0, "height": 12.0}
+    ).json()
+
+    assert accepted["accepted"] is True
+    assert accepted["output_width"] == 1800
+    assert accepted["simulation_width"] == 900
+    assert accepted["bicubic_upsample"] == 2
+    assert accepted["scale_model_status"] == "calibration-required"
+    assert accepted["estimated_seconds_high"] > accepted["estimated_seconds_low"]
+    assert oversized["accepted"] is False
+    assert oversized["issues"]
+
+
+def test_time_study_runs_one_bounded_simulation_and_returns_ordered_images(client):
+    response = client.post(
+        "/api/v1/time-studies",
+        json={
+            "controls": CONTROLS,
+            "seed": 3,
+            "checkpoints": [100, 200],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    body = response.json()
+    assert body["simulation_size"] == 8
+    assert [checkpoint["steps"] for checkpoint in body["checkpoints"]] == [100, 200]
+    assert all(
+        checkpoint["image_url"].startswith("data:image/png;base64,")
+        for checkpoint in body["checkpoints"]
+    )
+    metrics = client.get("/metrics").text
+    assert "turing_time_studies_started_total 1" in metrics
+    assert "turing_time_studies_finished_total 1" in metrics
+
+
 def test_generate_is_reproducible_and_embeds_a_complete_recipe(client):
     payload = {"controls": CONTROLS, "seed": 19}
 
@@ -165,7 +222,7 @@ def test_generate_is_reproducible_and_embeds_a_complete_recipe(client):
         "dtype": "float32",
         "simulation_size": 8,
         "steps": 2,
-        "upsample": 1,
+        "upsample": 2,
         "controls": CONTROLS,
         "seed": 19,
     }

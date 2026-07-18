@@ -7,6 +7,7 @@ import {
   type FormEvent,
 } from 'react'
 import './App.css'
+import RenderStudio from './RenderStudio'
 import {
   controlsMessage,
   updateControl,
@@ -43,7 +44,9 @@ type ServerMessage =
       engine_version?: string
       preview_size: number
       frame_rate: number
+      iteration?: number
     }
+  | { type: 'frame'; frame_id: number; iteration: number }
   | { type: 'error'; error: { code: string; message: string } }
 
 const statusText: Record<ConnectionState, string> = {
@@ -143,6 +146,10 @@ function App() {
   const [comparison, setComparison] = useState<ComparisonSnapshot | null>(null)
   const [showBefore, setShowBefore] = useState(false)
   const [historyCounts, setHistoryCounts] = useState({ undo: 0, redo: 0 })
+  const [liveIteration, setLiveIteration] = useState(0)
+  const [renderRecipe, setRenderRecipe] = useState(() => cloneRecipe(loadedRecipe.recipe))
+  const [renderReferenceSteps, setRenderReferenceSteps] = useState(0)
+  const [renderHandoffVersion, setRenderHandoffVersion] = useState(0)
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const advancedRef = useRef<HTMLDetailsElement | null>(null)
@@ -155,6 +162,7 @@ function App() {
   const engineVersionRef = useRef(loadedRecipe.recipe.engine_version)
   const undoStackRef = useRef<PatternRecipe[]>([])
   const redoStackRef = useRef<PatternRecipe[]>([])
+  const pendingFrameMetadataRef = useRef<Array<{ frameId: number; iteration: number }>>([])
 
   const send = useCallback((message: object) => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
@@ -204,6 +212,7 @@ function App() {
       setShowBefore(false)
       send(controlsMessage(normalized.controls))
       send({ type: 'reset', seed: normalized.seed })
+      setLiveIteration(0)
       if (notice) setRecipeNotice(notice)
     },
     [clearQueuedControls, recordRecipe, send],
@@ -274,6 +283,7 @@ function App() {
 
   const restartCurrentSeed = () => {
     send({ type: 'reset', seed: recipeRef.current.seed })
+    setLiveIteration(0)
     setRecipeNotice(`Restarted deterministically with seed ${recipeRef.current.seed}.`)
   }
 
@@ -287,6 +297,7 @@ function App() {
     const nextRecipe = { ...recipeRef.current, seed }
     recordRecipe(nextRecipe)
     send({ type: 'reset', seed })
+    setLiveIteration(0)
     setRecipeNotice(`Restarted with seed ${seed}.`)
   }
 
@@ -295,6 +306,7 @@ function App() {
     const nextRecipe = { ...recipeRef.current, seed }
     recordRecipe(nextRecipe)
     send({ type: 'reset', seed })
+    setLiveIteration(0)
     setRecipeNotice(`New random seed: ${seed}.`)
   }
 
@@ -325,6 +337,7 @@ function App() {
     setShowBefore(false)
     send(controlsMessage(normalized.controls))
     send({ type: 'reset', seed: normalized.seed })
+    setLiveIteration(0)
     setRecipeNotice(notice)
   }
 
@@ -438,6 +451,12 @@ function App() {
     }, 'image/png')
   }
 
+  const handOffToRenderer = () => {
+    setRenderRecipe(cloneRecipe(recipeRef.current))
+    setRenderReferenceSteps(liveIteration)
+    setRenderHandoffVersion((value) => value + 1)
+  }
+
   useEffect(() => {
     const timer = window.setTimeout(() => {
       try {
@@ -469,6 +488,7 @@ function App() {
       const websocket = new WebSocket(`${protocol}//${window.location.host}/ws`)
       websocket.binaryType = 'blob'
       socketRef.current = websocket
+      pendingFrameMetadataRef.current = []
 
       websocket.onopen = () => {
         reconnectAttempts = 0
@@ -502,6 +522,7 @@ function App() {
             setConnectionState(pausedRef.current ? 'paused' : 'live')
             engineVersionRef.current = readyEngineVersion
             setEngineVersion(readyEngineVersion)
+            setLiveIteration(message.iteration ?? 0)
             if (recipeRef.current.engine_version !== readyEngineVersion) {
               const previousVersion = recipeRef.current.engine_version
               commitRecipe({
@@ -520,6 +541,17 @@ function App() {
             return
           }
 
+          if (message.type === 'frame') {
+            pendingFrameMetadataRef.current.push({
+              frameId: message.frame_id,
+              iteration: message.iteration,
+            })
+            if (pendingFrameMetadataRef.current.length > 4) {
+              pendingFrameMetadataRef.current.shift()
+            }
+            return
+          }
+
           terminalError = true
           setStatusDetail(message.error.message)
           if (message.error.code === 'server_busy') setConnectionState('busy')
@@ -530,6 +562,7 @@ function App() {
         }
 
         const sequence = ++latestFrameRef.current
+        const frameMetadata = pendingFrameMetadataRef.current.shift()
         try {
           const bitmap = await createImageBitmap(event.data as Blob)
           if (disposed || sequence !== latestFrameRef.current) {
@@ -543,6 +576,7 @@ function App() {
             canvas.height = bitmap.height
             context.drawImage(bitmap, 0, 0)
             setHasFrame(true)
+            if (frameMetadata) setLiveIteration(frameMetadata.iteration)
           }
           bitmap.close()
         } catch {
@@ -793,6 +827,10 @@ function App() {
 
         <div className="preview-column">
           <div className="preview-sticky">
+            <div className="preview-heading">
+              <strong>Live preview</strong>
+              <output aria-label="Live simulation iteration">Step {liveIteration.toLocaleString()}</output>
+            </div>
             <div className={`preview-frame ${hasFrame ? 'has-frame' : ''}`}>
               {comparison && showBefore && (
                 <img
@@ -876,6 +914,13 @@ function App() {
         )}
       </details>
       </section>
+
+      <RenderStudio
+        recipe={renderRecipe}
+        liveSteps={renderReferenceSteps}
+        handoffVersion={renderHandoffVersion}
+        onImportLiveSettings={handOffToRenderer}
+      />
     </main>
   )
 }

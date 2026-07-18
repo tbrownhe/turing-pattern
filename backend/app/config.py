@@ -69,6 +69,9 @@ class Settings:
     render_size: int
     render_steps: int
     render_upsample: int
+    max_render_simulation_pixels: int
+    max_render_output_edge: int
+    benchmark_iterations_per_second: float
     log_level: str
 
     @classmethod
@@ -119,6 +122,21 @@ class Settings:
                 "TURING_RENDER_STEPS", 5000, minimum=100, maximum=20_000
             ),
             render_upsample=_get_int("TURING_RENDER_UPSAMPLE", 2, minimum=1, maximum=4),
+            max_render_simulation_pixels=_get_int(
+                "TURING_MAX_RENDER_SIMULATION_PIXELS",
+                1_048_576,
+                minimum=65_536,
+                maximum=16_777_216,
+            ),
+            max_render_output_edge=_get_int(
+                "TURING_MAX_RENDER_OUTPUT_EDGE", 4096, minimum=512, maximum=16_384
+            ),
+            benchmark_iterations_per_second=_get_float(
+                "TURING_BENCHMARK_ITERATIONS_PER_SECOND",
+                421.2,
+                minimum=1.0,
+                maximum=100_000.0,
+            ),
             log_level=_get_log_level("TURING_LOG_LEVEL"),
         )
 

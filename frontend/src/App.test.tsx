@@ -69,6 +69,7 @@ describe('live controls', () => {
   afterEach(() => {
     cleanup()
     vi.useRealTimers()
+    vi.restoreAllMocks()
     vi.unstubAllGlobals()
   })
 
@@ -195,6 +196,32 @@ describe('live controls', () => {
     expect(messages.at(-2)).toEqual({ type: 'pause' })
     expect(messages.at(-1)).toEqual({ type: 'step' })
     expect(screen.getByText('Simulation paused')).toBeTruthy()
+  })
+
+  it('pairs authoritative frame metadata with the painted live frame', async () => {
+    const drawImage = vi.fn()
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      drawImage,
+    } as unknown as CanvasRenderingContext2D)
+    vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({
+      width: 8,
+      height: 8,
+      close: vi.fn(),
+    }))
+    render(<App />)
+    const websocket = MockWebSocket.instances[0]
+    sendReady(websocket)
+
+    await act(async () => {
+      websocket.onmessage?.(new MessageEvent('message', {
+        data: JSON.stringify({ type: 'frame', frame_id: 1, iteration: 25 }),
+      }))
+      websocket.onmessage?.(new MessageEvent('message', { data: new Blob(['png']) }))
+      await Promise.resolve()
+    })
+
+    expect(screen.getByLabelText('Live simulation iteration').textContent).toBe('Step 25')
+    expect(drawImage).toHaveBeenCalledOnce()
   })
 
   it('undoes and redoes complete recipes with deterministic restarts', () => {

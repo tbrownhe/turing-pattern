@@ -51,6 +51,9 @@ class Metrics:
     renders_started: int = 0
     renders_finished: int = 0
     renders_rejected: int = 0
+    time_studies_started: int = 0
+    time_studies_finished: int = 0
+    time_studies_rejected: int = 0
     numerical_failures: int = 0
     frames: int = 0
     frame_step_seconds: float = 0.0
@@ -102,6 +105,9 @@ class Metrics:
                 "turing_renders_started_total": self.renders_started,
                 "turing_renders_finished_total": self.renders_finished,
                 "turing_renders_rejected_total": self.renders_rejected,
+                "turing_time_studies_started_total": self.time_studies_started,
+                "turing_time_studies_finished_total": self.time_studies_finished,
+                "turing_time_studies_rejected_total": self.time_studies_rejected,
                 "turing_numerical_failures_total": self.numerical_failures,
                 "turing_frames_total": self.frames,
                 "turing_frame_step_seconds_total": self.frame_step_seconds,

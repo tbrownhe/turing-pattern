@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from io import BytesIO
+from math import ceil
 from time import monotonic, perf_counter
 from uuid import uuid4
 
@@ -22,11 +24,13 @@ from app.api.schemas import (
     ControlsMessage,
     PauseMessage,
     PerturbMessage,
+    RenderPlanRequest,
     RenderRequest,
     ResetMessage,
     ResumeMessage,
     StartMessage,
     StepMessage,
+    TimeStudyRequest,
     parse_client_message,
 )
 from app.config import Settings, settings
@@ -50,6 +54,7 @@ class FrameResult:
     content: bytes
     step_seconds: float
     encode_seconds: float
+    iteration: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +62,10 @@ class RenderResult:
     content: bytes
     simulation_seconds: float
     encode_seconds: float
+
+
+QUALITY_PPI = {"draft": 150, "studio": 300, "fine": 600}
+QUALITY_LABELS = {"draft": "Draft", "studio": "Studio", "fine": "Fine"}
 
 
 def _encode_preview(simulator: TuringSimulator, steps: int) -> FrameResult:
@@ -70,7 +79,92 @@ def _encode_preview(simulator: TuringSimulator, steps: int) -> FrameResult:
         content=output.getvalue(),
         step_seconds=step_seconds,
         encode_seconds=perf_counter() - started,
+        iteration=simulator.state.iteration,
     )
+
+
+def _time_study(payload: TimeStudyRequest, size: int) -> list[dict[str, int | str]]:
+    simulator = TuringSimulator(
+        payload.controls.model_dump(),
+        shape=(size, size),
+        seed=payload.seed,
+    )
+    checkpoints: list[dict[str, int | str]] = []
+    for target in payload.checkpoints:
+        frame = simulator.step(steps=target - simulator.state.iteration)
+        output = BytesIO()
+        Image.fromarray(frame).save(output, format="PNG", optimize=False)
+        encoded = base64.b64encode(output.getvalue()).decode("ascii")
+        checkpoints.append(
+            {
+                "steps": target,
+                "image_url": f"data:image/png;base64,{encoded}",
+            }
+        )
+    return checkpoints
+
+
+def _render_plan(payload: RenderPlanRequest, config: Settings) -> dict[str, object]:
+    ppi = QUALITY_PPI[payload.quality]
+    width_inches = payload.width if payload.unit == "in" else payload.width / 2.54
+    height_inches = payload.height if payload.unit == "in" else payload.height / 2.54
+    output_width = max(1, round(width_inches * ppi))
+    output_height = max(1, round(height_inches * ppi))
+    simulation_width = ceil(output_width / config.render_upsample)
+    simulation_height = ceil(output_height / config.render_upsample)
+    simulation_pixels = simulation_width * simulation_height
+
+    issues: list[str] = []
+    if max(output_width, output_height) > config.max_render_output_edge:
+        issues.append(
+            "The output edge exceeds the configured "
+            f"{config.max_render_output_edge:,}-pixel limit."
+        )
+    if simulation_pixels > config.max_render_simulation_pixels:
+        issues.append(
+            "The numerical grid exceeds the configured "
+            f"{config.max_render_simulation_pixels:,}-cell limit."
+        )
+
+    preview_pixels = 256 * 256
+    estimated_seconds = (
+        payload.development_steps
+        * simulation_pixels
+        / (config.benchmark_iterations_per_second * preview_pixels)
+    )
+    estimated_memory_bytes = 65_000_000 + simulation_pixels * 32
+    if simulation_pixels <= 262_144:
+        resource_class = "light"
+    elif simulation_pixels <= 589_824:
+        resource_class = "moderate"
+    else:
+        resource_class = "heavy"
+
+    return {
+        "accepted": not issues,
+        "issues": issues,
+        "unit": payload.unit,
+        "physical_width": payload.width,
+        "physical_height": payload.height,
+        "quality": payload.quality,
+        "quality_label": QUALITY_LABELS[payload.quality],
+        "pixels_per_inch": ppi,
+        "feature_scale": payload.feature_scale,
+        "scale_model_status": "calibration-required",
+        "development_steps": payload.development_steps,
+        "framing": payload.framing,
+        "output_width": output_width,
+        "output_height": output_height,
+        "simulation_width": simulation_width,
+        "simulation_height": simulation_height,
+        "simulation_pixels": simulation_pixels,
+        "bicubic_upsample": config.render_upsample,
+        "estimated_seconds_low": max(1, round(estimated_seconds * 0.85)),
+        "estimated_seconds_high": max(1, round(estimated_seconds * 1.5)),
+        "estimated_memory_bytes": estimated_memory_bytes,
+        "resource_class": resource_class,
+        "engine_version": ENGINE_VERSION,
+    }
 
 
 def _render_png(payload: RenderRequest, config: Settings) -> RenderResult:
@@ -226,6 +320,65 @@ def create_app(config: Settings = settings) -> FastAPI:
             media_type="text/plain; version=0.0.4",
         )
 
+    @application.post("/api/v1/render-plans")
+    async def plan_render(payload: RenderPlanRequest) -> dict[str, object]:
+        return _render_plan(payload, config)
+
+    @application.post("/api/v1/time-studies")
+    async def create_time_study(
+        payload: TimeStudyRequest, request: Request, response: Response
+    ) -> dict[str, object]:
+        runtime: ComputeRuntime = request.app.state.runtime
+        request_id = uuid4().hex
+        if not await runtime.gate.acquire():
+            runtime.metrics.increment("time_studies_rejected")
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "server_busy",
+                    "message": (
+                        "Time-study capacity is currently full. Please retry shortly."
+                    ),
+                },
+                headers={"Retry-After": "2", "X-Request-ID": request_id},
+            )
+
+        runtime.metrics.increment("time_studies_started")
+        logger.info(
+            "time study started",
+            extra={"event": "time_study_started", "request_id": request_id},
+        )
+        started = monotonic()
+        try:
+            checkpoints = await runtime.run(_time_study, payload, config.preview_size)
+        except SimulationError as error:
+            runtime.metrics.increment("numerical_failures")
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "simulation_failed", "message": str(error)},
+                headers={"X-Request-ID": request_id},
+            ) from error
+        finally:
+            runtime.gate.release()
+
+        runtime.metrics.increment("time_studies_finished")
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["X-Request-ID"] = request_id
+        logger.info(
+            "time study completed",
+            extra={
+                "event": "time_study_completed",
+                "request_id": request_id,
+                "duration_seconds": monotonic() - started,
+            },
+        )
+        return {
+            "engine_version": ENGINE_VERSION,
+            "simulation_size": config.preview_size,
+            "seed": payload.seed,
+            "checkpoints": checkpoints,
+        }
+
     @application.post("/api/v1/generate", response_class=Response)
     async def generate(payload: RenderRequest, request: Request) -> Response:
         runtime: ComputeRuntime = request.app.state.runtime
@@ -347,6 +500,7 @@ def create_app(config: Settings = settings) -> FastAPI:
             running = asyncio.Event()
             running.set()
             last_activity = monotonic()
+            frame_id = 0
 
             await websocket.send_json(
                 {
@@ -356,8 +510,22 @@ def create_app(config: Settings = settings) -> FastAPI:
                     "session_id": session_id,
                     "preview_size": config.preview_size,
                     "frame_rate": config.frame_rate,
+                    "iteration": simulator.state.iteration,
                 }
             )
+
+            async def send_frame(frame: FrameResult) -> None:
+                nonlocal frame_id
+                async with send_lock:
+                    frame_id += 1
+                    await websocket.send_json(
+                        {
+                            "type": "frame",
+                            "frame_id": frame_id,
+                            "iteration": frame.iteration,
+                        }
+                    )
+                    await websocket.send_bytes(frame.content)
 
             async def receive_controls() -> None:
                 nonlocal last_activity
@@ -383,8 +551,7 @@ def create_app(config: Settings = settings) -> FastAPI:
                             frame.encode_seconds,
                             len(frame.content),
                         )
-                        async with send_lock:
-                            await websocket.send_bytes(frame.content)
+                        await send_frame(frame)
                         continue
 
                     async with simulation_lock:
@@ -422,8 +589,7 @@ def create_app(config: Settings = settings) -> FastAPI:
                     runtime.metrics.observe_frame(
                         frame.step_seconds, frame.encode_seconds, len(frame.content)
                     )
-                    async with send_lock:
-                        await websocket.send_bytes(frame.content)
+                    await send_frame(frame)
                     delay = frame_interval - (monotonic() - frame_started)
                     if delay > 0:
                         await asyncio.sleep(delay)
