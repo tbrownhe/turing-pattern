@@ -50,7 +50,8 @@ RSS remains above 70% of the 2 GiB limit or event-loop lag remains above 250 ms.
 ## Tune on the OptiPlex
 
 Run `scripts/engine_benchmark.py` and `scripts/load_test.py` from
-[BENCHMARK.md](../BENCHMARK.md). Increase only one of worker count, admission count,
+[BENCHMARK.md](../BENCHMARK.md), then run the browser and maximum-grid studies in
+[BUDGETS.md](../BUDGETS.md). Increase only one of worker count, admission count,
 resolution, FPS, or steps per frame at a time. Health latency and RSS must retain
 headroom for Traefik and the OS. A busy response is healthy overload behavior.
 

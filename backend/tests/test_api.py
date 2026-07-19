@@ -98,8 +98,47 @@ def test_websocket_starts_and_produces_a_png_frame(client):
     assert ready["type"] == "ready"
     assert ready["engine_version"] == "2.0.0"
     assert ready["preview_size"] == 8
-    assert metadata == {"type": "frame", "frame_id": 1, "iteration": 1}
+    assert metadata == {
+        "type": "frame",
+        "frame_id": 1,
+        "iteration": 1,
+        "controls_revision": 0,
+    }
     assert frame.startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_websocket_frames_acknowledge_applied_control_revisions(client):
+    with client.websocket_connect("/ws", headers={"origin": ORIGIN}) as websocket:
+        websocket.send_json(
+            {
+                "type": "start",
+                "protocol_version": 1,
+                "controls": CONTROLS,
+                "seed": 7,
+            }
+        )
+        assert websocket.receive_json()["type"] == "ready"
+        websocket.receive_json()
+        websocket.receive_bytes()
+        websocket.send_json(
+            {
+                "type": "controls",
+                "controls": {**CONTROLS, "F1": 0.051},
+                "revision": 17,
+            }
+        )
+
+        acknowledged = None
+        for _ in range(10):
+            metadata = websocket.receive_json()
+            websocket.receive_bytes()
+            if metadata["controls_revision"] == 17:
+                acknowledged = metadata
+                break
+        websocket.send_json({"type": "pause"})
+
+    assert acknowledged is not None
+    assert acknowledged["iteration"] >= 2
 
 
 def test_websocket_can_advance_one_iteration_while_paused(client):

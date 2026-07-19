@@ -74,6 +74,7 @@ async def check_websocket() -> None:
         metadata = json.loads(await asyncio.wait_for(websocket.recv(), timeout=10))
         assert metadata["type"] == "frame"
         assert metadata["iteration"] > 0
+        assert metadata["controls_revision"] == 0
         frame = await asyncio.wait_for(websocket.recv(), timeout=10)
         assert isinstance(frame, bytes)
         assert frame.startswith(b"\x89PNG\r\n\x1a\n")

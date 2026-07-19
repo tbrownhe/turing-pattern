@@ -42,11 +42,15 @@ def test_start_message_is_strict_and_versioned():
     assert message.seed == 42
 
 
-def test_control_message_round_trips_displayed_values():
-    message = parse({"type": "controls", "controls": VALID_CONTROLS})
+def test_control_message_round_trips_displayed_values_and_revision():
+    message = parse({"type": "controls", "controls": VALID_CONTROLS, "revision": 17})
 
     assert isinstance(message, ControlsMessage)
     assert message.controls.F1 == 0.04
+    assert message.revision == 17
+
+    with pytest.raises(ValidationError):
+        parse({"type": "controls", "controls": VALID_CONTROLS, "revision": 0})
 
 
 def test_step_message_has_no_client_controlled_work_size():

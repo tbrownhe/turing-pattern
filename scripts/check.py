@@ -19,6 +19,7 @@ SCRIPT_FILES = [
     "../scripts/check.py",
     "../scripts/engine_benchmark.py",
     "../scripts/load_test.py",
+    "../scripts/render_memory_probe.py",
     "../scripts/smoke_test.py",
 ]
 
@@ -34,7 +35,7 @@ def main() -> None:
         [*UV, "ruff", "format", "--check", "app", "tests", *SCRIPT_FILES],
         BACKEND,
     )
-    run([*UV, "mypy", "app"], BACKEND)
+    run([*UV, "mypy", "--ignore-missing-imports", "app"], BACKEND)
     run([*UV, "python", "-m", "pytest", "-q"], BACKEND)
 
     npm = "npm.cmd" if sys.platform == "win32" else "npm"

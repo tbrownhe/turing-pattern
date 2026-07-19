@@ -88,6 +88,7 @@ describe('live controls', () => {
     expect(message).toEqual({
       type: 'controls',
       controls: expect.objectContaining({ F1: 0.051 }),
+      revision: 1,
     })
     expect(screen.getByText('0.0510')).toBeTruthy()
   })
@@ -162,6 +163,7 @@ describe('live controls', () => {
     expect(messages.at(-2)).toEqual({
       type: 'controls',
       controls: recipeForPreset('coral').controls,
+      revision: 1,
     })
     expect(messages.at(-1)).toEqual({ type: 'reset', seed: 0 })
     expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Branching coral')
@@ -214,7 +216,12 @@ describe('live controls', () => {
 
     await act(async () => {
       websocket.onmessage?.(new MessageEvent('message', {
-        data: JSON.stringify({ type: 'frame', frame_id: 1, iteration: 25 }),
+        data: JSON.stringify({
+          type: 'frame',
+          frame_id: 1,
+          iteration: 25,
+          controls_revision: 3,
+        }),
       }))
       websocket.onmessage?.(new MessageEvent('message', { data: new Blob(['png']) }))
       await Promise.resolve()
@@ -222,6 +229,56 @@ describe('live controls', () => {
 
     expect(screen.getByLabelText('Live simulation iteration').textContent).toBe('Step 25')
     expect(drawImage).toHaveBeenCalledOnce()
+    expect(screen.getByRole('img', { name: 'Live grayscale Turing pattern preview' }).dataset.controlsRevision).toBe('3')
+  })
+
+  it('keeps only the newest frame while image decoding is busy', async () => {
+    const drawImage = vi.fn()
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      drawImage,
+    } as unknown as CanvasRenderingContext2D)
+    const firstBitmap = { width: 8, height: 8, close: vi.fn() }
+    const latestBitmap = { width: 8, height: 8, close: vi.fn() }
+    let resolveFirst: (bitmap: typeof firstBitmap) => void = () => undefined
+    const decode = vi
+      .fn()
+      .mockImplementationOnce(
+        () => new Promise<typeof firstBitmap>((resolve) => { resolveFirst = resolve }),
+      )
+      .mockResolvedValueOnce(latestBitmap)
+    vi.stubGlobal('createImageBitmap', decode)
+    render(<App />)
+    const websocket = MockWebSocket.instances[0]
+    sendReady(websocket)
+
+    await act(async () => {
+      for (const frameId of [1, 2, 3]) {
+        websocket.onmessage?.(new MessageEvent('message', {
+          data: JSON.stringify({
+            type: 'frame',
+            frame_id: frameId,
+            iteration: frameId * 25,
+            controls_revision: frameId,
+          }),
+        }))
+        websocket.onmessage?.(
+          new MessageEvent('message', { data: new Blob([`png-${frameId}`]) }),
+        )
+      }
+      resolveFirst(firstBitmap)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    const canvas = screen.getByRole('img', {
+      name: 'Live grayscale Turing pattern preview',
+    }) as HTMLCanvasElement
+    expect(decode).toHaveBeenCalledTimes(2)
+    expect(drawImage).toHaveBeenCalledOnce()
+    expect(canvas.dataset.frameId).toBe('3')
+    expect(canvas.dataset.droppedFrames).toBe('2')
+    expect(canvas.dataset.pendingFrames).toBe('0')
+    expect(screen.getByLabelText('Live simulation iteration').textContent).toBe('Step 75')
   })
 
   it('undoes and redoes complete recipes with deterministic restarts', () => {
@@ -238,6 +295,7 @@ describe('live controls', () => {
     expect(messages.at(-2)).toEqual({
       type: 'controls',
       controls: recipeForPreset('mixed').controls,
+      revision: 2,
     })
     expect(messages.at(-1)).toEqual({ type: 'reset', seed: 0 })
 
@@ -246,6 +304,7 @@ describe('live controls', () => {
     expect(messages.at(-2)).toEqual({
       type: 'controls',
       controls: recipeForPreset('coral').controls,
+      revision: 3,
     })
     expect(messages.at(-1)).toEqual({ type: 'reset', seed: 0 })
   })

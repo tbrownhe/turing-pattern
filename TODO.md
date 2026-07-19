@@ -317,7 +317,7 @@ Done when:
 
 ## P2 — Deliver the creative product
 
-### [ ] P2.1 Design two clear modes: Live Lab and High-Resolution Render
+### [x] P2.1 Design two clear modes: Live Lab and High-Resolution Render
 
 #### [x] P2.1a Build reproducible Live Lab recipes
 
@@ -413,6 +413,15 @@ Done when:
 
 Measure on the production OptiPlex and a mid-range phone/laptop, then record budgets
 here rather than guessing from a development machine. Initial targets to validate:
+
+- Added applied-control revisions to frame metadata and the painted canvas so
+  control-to-paint latency measures a frame that actually used the requested values.
+- Replaced concurrent image decoding with a one-item latest-frame queue. Slow decode
+  drops superseded work, exposes diagnostics, and cannot accumulate stale previews.
+- Added a repeatable Chromium study for first preview, control response, queue depth,
+  retained heap, render progress, and public health/static latency, plus a
+  maximum-valid-grid backend RSS/event-loop probe. Short development runs validate
+  the instruments only; the 30-minute production/device baselines remain required.
 
 - meaningful first preview within 2 seconds on a warm service;
 - visible response to a control change within 150 ms for browser-side preview, or

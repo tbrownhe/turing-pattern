@@ -187,14 +187,19 @@ The browser opens `/ws` and first sends protocol version 1:
 ```
 
 Subsequent message types are `controls`, `pause`, `resume`, `step`, `reset`, and
-`perturb`. A `step` advances exactly one numerical iteration and leaves the session
-paused; clients cannot supply an iteration count.
+`perturb`. Control messages carry a monotonically increasing browser revision. A
+`step` advances exactly one numerical iteration and leaves the session paused;
+clients cannot supply an iteration count.
 Unknown fields, non-finite values, and values outside the documented schema are
 rejected. Clients cannot choose simulation allocation size. The server's `ready`
 message identifies the engine version recorded by the recipe UI. Each binary PNG is
-preceded by a small `frame` message containing its frame ID and authoritative
-iteration count, so dropped browser frames cannot corrupt the displayed development
-reference.
+preceded by a small `frame` message containing its frame ID, authoritative iteration
+count, and applied control revision. The browser keeps at most one frame waiting for
+decode and paints only the newest paired frame, so overload cannot grow a stale-frame
+queue or corrupt the displayed development reference.
+
+Repeatable browser and maximum-grid server measurements are documented in
+[BUDGETS.md](BUDGETS.md).
 
 The fixed-size PNG endpoint accepts the same controls and a seed:
 

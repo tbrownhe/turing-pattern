@@ -46,7 +46,12 @@ type ServerMessage =
       frame_rate: number
       iteration?: number
     }
-  | { type: 'frame'; frame_id: number; iteration: number }
+  | {
+      type: 'frame'
+      frame_id: number
+      iteration: number
+      controls_revision?: number
+    }
   | { type: 'error'; error: { code: string; message: string } }
 
 const statusText: Record<ConnectionState, string> = {
@@ -64,6 +69,17 @@ const HISTORY_LIMIT = 30
 interface ComparisonSnapshot {
   recipe: PatternRecipe
   imageUrl: string
+}
+
+interface PendingFrameMetadata {
+  frameId: number
+  iteration: number
+  controlsRevision: number
+}
+
+interface PendingFrame {
+  blob: Blob
+  metadata: PendingFrameMetadata | undefined
 }
 
 function controlsHaveGradient(controls: Controls): boolean {
@@ -158,17 +174,22 @@ function App() {
   const recipeRef = useRef<PatternRecipe>(loadedRecipe.recipe)
   const controlsTimerRef = useRef<number | null>(null)
   const pausedRef = useRef(false)
-  const latestFrameRef = useRef(0)
+  const controlsRevisionRef = useRef(0)
   const engineVersionRef = useRef(loadedRecipe.recipe.engine_version)
   const undoStackRef = useRef<PatternRecipe[]>([])
   const redoStackRef = useRef<PatternRecipe[]>([])
-  const pendingFrameMetadataRef = useRef<Array<{ frameId: number; iteration: number }>>([])
+  const pendingFrameMetadataRef = useRef<PendingFrameMetadata[]>([])
 
   const send = useCallback((message: object) => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify(message))
     }
   }, [])
+
+  const sendControls = useCallback((controls: Controls) => {
+    controlsRevisionRef.current += 1
+    send(controlsMessage(controls, controlsRevisionRef.current))
+  }, [send])
 
   const commitRecipe = useCallback((nextRecipe: PatternRecipe) => {
     recipeRef.current = nextRecipe
@@ -210,12 +231,12 @@ function App() {
       recordRecipe(normalized)
       setGradientEditing(controlsHaveGradient(normalized.controls))
       setShowBefore(false)
-      send(controlsMessage(normalized.controls))
+      sendControls(normalized.controls)
       send({ type: 'reset', seed: normalized.seed })
       setLiveIteration(0)
       if (notice) setRecipeNotice(notice)
     },
-    [clearQueuedControls, recordRecipe, send],
+    [clearQueuedControls, recordRecipe, send, sendControls],
   )
 
   const queueControls = (nextControls: Controls) => {
@@ -230,7 +251,7 @@ function App() {
 
     controlsTimerRef.current = window.setTimeout(() => {
       controlsTimerRef.current = null
-      send(controlsMessage(recipeRef.current.controls))
+      sendControls(recipeRef.current.controls)
     }, 50)
   }
 
@@ -335,7 +356,7 @@ function App() {
     commitRecipe(normalized)
     setGradientEditing(controlsHaveGradient(normalized.controls))
     setShowBefore(false)
-    send(controlsMessage(normalized.controls))
+    sendControls(normalized.controls)
     send({ type: 'reset', seed: normalized.seed })
     setLiveIteration(0)
     setRecipeNotice(notice)
@@ -489,6 +510,69 @@ function App() {
       websocket.binaryType = 'blob'
       socketRef.current = websocket
       pendingFrameMetadataRef.current = []
+      let decodingFrame = false
+      let queuedFrame: PendingFrame | null = null
+      let droppedFrames = 0
+
+      const updateFrameDiagnostics = () => {
+        const canvas = canvasRef.current
+        if (!canvas) return
+        canvas.dataset.pendingFrames = queuedFrame ? '1' : '0'
+        canvas.dataset.droppedFrames = String(droppedFrames)
+      }
+
+      const paintLatestFrame = async (candidate: PendingFrame) => {
+        if (decodingFrame) {
+          if (queuedFrame) droppedFrames += 1
+          queuedFrame = candidate
+          updateFrameDiagnostics()
+          return
+        }
+
+        decodingFrame = true
+        let current: PendingFrame | null = candidate
+        while (current && !disposed && socketRef.current === websocket) {
+          queuedFrame = null
+          updateFrameDiagnostics()
+          let bitmap: ImageBitmap
+          try {
+            bitmap = await createImageBitmap(current.blob)
+          } catch {
+            setStatusDetail('A preview frame could not be decoded.')
+            current = queuedFrame
+            continue
+          }
+
+          if (disposed || socketRef.current !== websocket) {
+            bitmap.close()
+            break
+          }
+          if (queuedFrame) {
+            droppedFrames += 1
+            bitmap.close()
+            current = queuedFrame
+            continue
+          }
+
+          const canvas = canvasRef.current
+          const context = canvas?.getContext('2d')
+          if (canvas && context) {
+            canvas.width = bitmap.width
+            canvas.height = bitmap.height
+            context.drawImage(bitmap, 0, 0)
+            if (current.metadata) {
+              canvas.dataset.frameId = String(current.metadata.frameId)
+              canvas.dataset.controlsRevision = String(current.metadata.controlsRevision)
+              setLiveIteration(current.metadata.iteration)
+            }
+            setHasFrame(true)
+          }
+          bitmap.close()
+          current = queuedFrame
+        }
+        decodingFrame = false
+        updateFrameDiagnostics()
+      }
 
       websocket.onopen = () => {
         reconnectAttempts = 0
@@ -502,7 +586,7 @@ function App() {
         )
       }
 
-      websocket.onmessage = async (event) => {
+      websocket.onmessage = (event) => {
         if (typeof event.data === 'string') {
           let message: ServerMessage
           try {
@@ -545,10 +629,8 @@ function App() {
             pendingFrameMetadataRef.current.push({
               frameId: message.frame_id,
               iteration: message.iteration,
+              controlsRevision: message.controls_revision ?? 0,
             })
-            if (pendingFrameMetadataRef.current.length > 4) {
-              pendingFrameMetadataRef.current.shift()
-            }
             return
           }
 
@@ -561,27 +643,10 @@ function App() {
           return
         }
 
-        const sequence = ++latestFrameRef.current
-        const frameMetadata = pendingFrameMetadataRef.current.shift()
-        try {
-          const bitmap = await createImageBitmap(event.data as Blob)
-          if (disposed || sequence !== latestFrameRef.current) {
-            bitmap.close()
-            return
-          }
-          const canvas = canvasRef.current
-          const context = canvas?.getContext('2d')
-          if (canvas && context) {
-            canvas.width = bitmap.width
-            canvas.height = bitmap.height
-            context.drawImage(bitmap, 0, 0)
-            setHasFrame(true)
-            if (frameMetadata) setLiveIteration(frameMetadata.iteration)
-          }
-          bitmap.close()
-        } catch {
-          setStatusDetail('A preview frame could not be decoded.')
-        }
+        void paintLatestFrame({
+          blob: event.data as Blob,
+          metadata: pendingFrameMetadataRef.current.shift(),
+        })
       }
 
       websocket.onclose = (event) => {
@@ -617,7 +682,6 @@ function App() {
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer)
       clearQueuedControls()
-      latestFrameRef.current += 1
       socketRef.current?.close(1000, 'Page closed')
       socketRef.current = null
     }

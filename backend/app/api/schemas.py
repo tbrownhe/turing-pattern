@@ -11,6 +11,7 @@ DiffusionRate = Annotated[
 ]
 Seed = Annotated[int, Field(ge=0, le=4_294_967_295, strict=True)]
 DevelopmentStep = Annotated[int, Field(ge=100, le=20_000, strict=True)]
+ControlRevision = Annotated[int, Field(ge=1, le=2_147_483_647, strict=True)]
 PhysicalDimension = Annotated[
     float, Field(gt=0.0, le=100.0, allow_inf_nan=False, strict=True)
 ]
@@ -42,6 +43,7 @@ class StartMessage(StrictModel):
 class ControlsMessage(StrictModel):
     type: Literal["controls"]
     controls: Controls
+    revision: ControlRevision | None = None
 
 
 class ResetMessage(StrictModel):

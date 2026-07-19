@@ -619,6 +619,7 @@ def create_app(config: Settings = settings) -> FastAPI:
             running.set()
             last_activity = monotonic()
             frame_id = 0
+            controls_revision = 0
 
             await websocket.send_json(
                 {
@@ -632,7 +633,7 @@ def create_app(config: Settings = settings) -> FastAPI:
                 }
             )
 
-            async def send_frame(frame: FrameResult) -> None:
+            async def send_frame(frame: FrameResult, applied_revision: int) -> None:
                 nonlocal frame_id
                 async with send_lock:
                     frame_id += 1
@@ -641,12 +642,13 @@ def create_app(config: Settings = settings) -> FastAPI:
                             "type": "frame",
                             "frame_id": frame_id,
                             "iteration": frame.iteration,
+                            "controls_revision": applied_revision,
                         }
                     )
                     await websocket.send_bytes(frame.content)
 
             async def receive_controls() -> None:
-                nonlocal last_activity
+                nonlocal controls_revision, last_activity
                 while True:
                     message = await _receive_message(websocket, config)
                     last_activity = monotonic()
@@ -664,12 +666,13 @@ def create_app(config: Settings = settings) -> FastAPI:
                         running.clear()
                         async with simulation_lock:
                             frame = await runtime.run(_encode_preview, simulator, 1)
+                            frame_revision = controls_revision
                         runtime.metrics.observe_frame(
                             frame.step_seconds,
                             frame.encode_seconds,
                             len(frame.content),
                         )
-                        await send_frame(frame)
+                        await send_frame(frame, frame_revision)
                         continue
 
                     async with simulation_lock:
@@ -678,6 +681,8 @@ def create_app(config: Settings = settings) -> FastAPI:
                                 simulator.update_controls,
                                 message.controls.model_dump(),
                             )
+                            if message.revision is not None:
+                                controls_revision = message.revision
                         elif isinstance(message, ResetMessage):
                             await runtime.run(simulator.reset, message.seed)
                         elif isinstance(message, PerturbMessage):
@@ -704,10 +709,11 @@ def create_app(config: Settings = settings) -> FastAPI:
                         frame = await runtime.run(
                             _encode_preview, simulator, config.steps_per_frame
                         )
+                        frame_revision = controls_revision
                     runtime.metrics.observe_frame(
                         frame.step_seconds, frame.encode_seconds, len(frame.content)
                     )
-                    await send_frame(frame)
+                    await send_frame(frame, frame_revision)
                     delay = frame_interval - (monotonic() - frame_started)
                     if delay > 0:
                         await asyncio.sleep(delay)

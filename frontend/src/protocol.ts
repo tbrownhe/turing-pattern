@@ -54,6 +54,6 @@ export function updateControl(
   return { ...controls, [key]: value }
 }
 
-export function controlsMessage(controls: Controls) {
-  return { type: 'controls' as const, controls }
+export function controlsMessage(controls: Controls, revision: number) {
+  return { type: 'controls' as const, controls, revision }
 }
