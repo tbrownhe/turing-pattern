@@ -422,6 +422,9 @@ here rather than guessing from a development machine. Initial targets to validat
   retained heap, render progress, and public health/static latency, plus a
   maximum-valid-grid backend RSS/event-loop probe. Short development runs validate
   the instruments only; the 30-minute production/device baselines remain required.
+- The production OptiPlex maximum 1,024 x 1,024 numerical grid peaked at 122,363,904
+  bytes RSS (5.70% of the 2 GiB limit), with 0.66 ms maximum event-loop lag and
+  1.00 ms health p95. The server-memory budget is validated with ample headroom.
 
 - meaningful first preview within 2 seconds on a warm service;
 - visible response to a control change within 150 ms for browser-side preview, or

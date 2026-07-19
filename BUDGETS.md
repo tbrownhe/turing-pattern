@@ -87,11 +87,31 @@ not the required OptiPlex or real-device baselines.
 
 ## Production and device results
 
-Pending:
+### OptiPlex 5060 maximum-grid memory
+
+Recorded on the production OptiPlex container with a 2 GiB backend limit. The
+1,024 x 1,024 simulation is the largest numerical grid accepted by current config.
+
+| Measurement | Production result |
+| --- | ---: |
+| Output / simulation grid | 2,048 x 2,048 / 1,024 x 1,024 |
+| Development steps / duration | 100 / 4.457 s |
+| Peak backend RSS | 122,363,904 bytes (116.7 MiB) |
+| Peak fraction of container limit | 5.70% |
+| Maximum event-loop lag | 0.66 ms |
+| Health mean / p95 | 0.82 / 1.00 ms |
+| Artifact size | 1,575,335 bytes |
+| Below 70% memory budget | yes |
+
+This validates the maximum-grid allocation budget with substantial recovery
+headroom. It does not estimate the runtime of a 20,000-step render; runtime remains
+bounded separately by the render timeout and should be calibrated from representative
+jobs.
+
+Still pending:
 
 - 30-minute Chromium run against the production OptiPlex.
 - 30-minute trace and interaction check on a named mid-range phone or laptop.
-- Maximum-grid memory probe on the production OptiPlex.
 - Configured-maximum `load_test.py` run correlated with backend metrics.
 
 P2.3 closes only after those results are recorded and the initial targets are either

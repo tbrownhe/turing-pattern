@@ -568,6 +568,16 @@ def create_app(config: Settings = settings) -> FastAPI:
 
         if not _origin_is_allowed(websocket, config):
             runtime.metrics.increment("sessions_rejected")
+            logger.warning(
+                "websocket origin rejected",
+                extra={
+                    "event": "websocket_origin_rejected",
+                    "session_id": session_id,
+                    "origin": websocket.headers.get("origin"),
+                    "host": websocket.headers.get("host"),
+                    "forwarded_proto": websocket.headers.get("x-forwarded-proto"),
+                },
+            )
             await websocket.close(code=1008, reason="WebSocket origin is not allowed.")
             return
 

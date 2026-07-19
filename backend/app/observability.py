@@ -15,6 +15,9 @@ LOG_FIELDS = (
     "duration_seconds",
     "frame_bytes",
     "error_code",
+    "origin",
+    "host",
+    "forwarded_proto",
 )
 
 
