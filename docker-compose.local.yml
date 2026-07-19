@@ -26,6 +26,10 @@ services:
       TURING_LOG_LEVEL: ${TURING_LOG_LEVEL:-INFO}
     ports:
       - "127.0.0.1:8000:8000"
+    networks:
+      default:
+        aliases:
+          - turing-backend
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2)"]
       interval: 10s
@@ -76,3 +80,7 @@ services:
 
 volumes:
   render-data:
+
+networks:
+  default:
+    driver: bridge

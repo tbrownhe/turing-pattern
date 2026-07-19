@@ -30,7 +30,9 @@ services:
       TURING_RENDER_CHUNK_STEPS: ${TURING_RENDER_CHUNK_STEPS:-100}
       TURING_LOG_LEVEL: ${TURING_LOG_LEVEL:-INFO}
     networks:
-      - default
+      default:
+        aliases:
+          - turing-backend
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2)"]
       interval: 30s
