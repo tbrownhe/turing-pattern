@@ -20,8 +20,10 @@ that experiment into a deliberately small, self-hosted web application.
 - Display-only preview zoom and contrast that never alter the saved numerical recipe.
 - An authoritative live iteration counter, recipe-to-render handoff, bounded
   multi-checkpoint development time study, and physical-size render planner.
+- A persistent, finite high-resolution queue with progress, cancellation, restart
+  recovery, expiring artifacts, and reproducible grayscale PNG downloads.
 - A bounded PNG endpoint at `POST /api/v1/generate` for the current fixed-size
-  export. The full queued high-resolution workflow is still on the roadmap.
+  compatibility export.
 - Strict versioned inputs, WebSocket origin checks, a shared compute limit, and
   CPU work isolated from FastAPI's event loop.
 - Same-origin production routing: Traefik exposes Nginx, and Nginx proxies `/api`
@@ -133,7 +135,7 @@ the current state and therefore does not alter the saved recipe.
 
 ## High-resolution planning and time studies
 
-**Use these settings for a render** carries the current recipe into a fresh-run
+**Import current Live Lab settings** carries the current recipe into a fresh-run
 planner; it does not attempt to reproduce or enlarge the current live frame. The
 displayed live iteration is an authoritative count paired with the painted frame and
 is offered as a reference for the new render's development steps.
@@ -150,10 +152,17 @@ ordered 256x256 checkpoints. Selecting a checkpoint makes that early-termination
 point the render target. Time studies share the same bounded compute admission policy
 as live sessions and fixed renders.
 
-Feature scale is recorded but deliberately marked `calibration-required`. The
-high-resolution queue remains disabled until P2.2 adds its durable bounded worker and
-a measured spatial-scale model; the planner never holds a long HTTP request open while
-pretending a queue exists.
+Original 1x feature scale can enter the persistent high-resolution queue. Fine 0.5x
+and Bold 2x are deliberately rejected until their spatial mappings are measured; the
+backend never changes diffusion chemistry to imitate scale. Queue metadata lives in
+SQLite, artifacts are atomically published on a dedicated Docker volume, and the UI
+recovers the latest job after refresh. One worker executes bounded chunks, reports
+progress, honors cancellation and timeout checks, and shares the global compute gate
+with live sessions and time studies.
+
+The job API is `POST /api/v1/renders`, `GET`/`DELETE /api/v1/renders/{id}`, and
+`GET /api/v1/renders/{id}/artifact`. Submission returns `202` and a `Location` header;
+it never holds the request open for numerical work.
 
 ## Public protocol
 
@@ -200,10 +209,11 @@ PNG exports contain the recipe in the `TuringParams` text field.
 
 ## Capacity and security model
 
-One Uvicorn process owns one in-memory admission controller. Live sessions and PNG
-requests share its slots, and all NumPy/Pillow work runs in a dedicated bounded
-executor. Do not add Uvicorn workers: each process would create another independent
-limit. A future durable render service will own multi-process high-resolution work.
+One Uvicorn process owns one in-memory admission controller. Live sessions, direct
+PNG requests, time studies, and queued high-resolution renders share its slots, and
+all NumPy/Pillow work runs in a dedicated bounded executor. Do not add Uvicorn
+workers: each process would create another independent capacity gate and render
+worker. The persistent render queue is deliberately single-process on this host.
 
 The production defaults admit two compute jobs and two short-lived waiters. Excess
 work is rejected with HTTP `503` or WebSocket close code `1013`. Traefik adds request
@@ -226,6 +236,13 @@ tuning variables are:
 | `TURING_MAX_RENDER_SIMULATION_PIXELS` | `1048576` | Conservative numerical-grid limit used by render planning |
 | `TURING_MAX_RENDER_OUTPUT_EDGE` | `4096` | Longest planned output edge in pixels |
 | `TURING_BENCHMARK_ITERATIONS_PER_SECOND` | `421.2` | Measured 256x256 OptiPlex throughput used for time estimates |
+| `TURING_MAX_RENDER_QUEUE` | `3` | Maximum waiting high-resolution jobs |
+| `TURING_MAX_RENDER_JOBS_PER_CLIENT` | `2` | Active queued/running jobs per client address |
+| `TURING_RENDER_JOB_TIMEOUT_SECONDS` | `900` | Maximum checked execution time per job |
+| `TURING_RENDER_ARTIFACT_TTL_SECONDS` | `86400` | Completed artifact lifetime |
+| `TURING_MAX_RENDER_ARTIFACTS` | `8` | Disk-bound completed artifact count |
+| `TURING_MAX_RENDER_JOB_HISTORY` | `64` | Retained terminal job-metadata records |
+| `TURING_RENDER_CHUNK_STEPS` | `100` | Work between progress/cancel/timeout checks |
 | `TURING_LOG_LEVEL` | `INFO` | Structured JSON log threshold |
 | `OPENBLAS_NUM_THREADS` | `1` | Native threads per compute worker |
 | `OMP_NUM_THREADS` | `1` | OpenMP threads per compute worker |

@@ -52,8 +52,16 @@ test('a visitor receives a live frame and can tune a control', async ({ page }) 
 
   await expect(page.getByRole('heading', { name: 'Plan a fresh realization' })).toBeVisible()
   await page.getByRole('button', { name: 'Import current Live Lab settings' }).click()
+  await page.getByRole('spinbutton', { name: 'Width' }).fill('0.1')
+  await page.getByRole('spinbutton', { name: 'Height' }).fill('0.1')
+  await page.getByRole('radio', { name: /Draft/ }).check()
+  await page.getByRole('spinbutton', { name: 'Evolution steps' }).fill('100')
   await page.getByRole('button', { name: 'Review render plan' }).click()
-  await expect(page.getByText('1,800 × 1,800 px')).toBeVisible()
+  await expect(page.getByText('15 × 15 px')).toBeVisible()
+  await page.getByRole('button', { name: 'Queue high-resolution render' }).click()
+  await expect(page.getByRole('link', { name: 'Download completed PNG' })).toBeVisible({
+    timeout: 15_000,
+  })
 })
 
 test('the preview remains fully visible while phone controls scroll', async ({ page }) => {

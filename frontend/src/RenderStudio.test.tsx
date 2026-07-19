@@ -9,6 +9,7 @@ const recipe = recipeForPreset('maze', 42)
 
 afterEach(() => {
   cleanup()
+  window.localStorage.clear()
   vi.unstubAllGlobals()
 })
 
@@ -84,5 +85,57 @@ describe('high-resolution render planning', () => {
     await waitFor(() => {
       expect((screen.getByLabelText('Evolution steps') as HTMLInputElement).value).toBe('2500')
     })
+  })
+
+  it('queues an accepted plan and remembers the job for refresh recovery', async () => {
+    const plan = {
+      accepted: true,
+      issues: [],
+      quality_label: 'Draft',
+      pixels_per_inch: 150,
+      feature_scale: 1,
+      scale_model_status: 'reference-validated',
+      development_steps: 5000,
+      output_width: 900,
+      output_height: 900,
+      simulation_width: 450,
+      simulation_height: 450,
+      simulation_pixels: 202500,
+      bicubic_upsample: 2,
+      estimated_seconds_low: 32,
+      estimated_seconds_high: 56,
+      estimated_memory_bytes: 71480000,
+      resource_class: 'light',
+      engine_version: '2.0.0',
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => plan })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          id: 'job-123',
+          state: 'queued',
+          progress_steps: 0,
+          requested_steps: 5000,
+          progress_percent: 0,
+          queue_position: 1,
+          cancel_requested: false,
+          error: null,
+          artifact_available: false,
+          artifact_url: null,
+          expires_at: null,
+          plan,
+        }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<RenderStudio recipe={recipe} liveSteps={5000} handoffVersion={1} onImportLiveSettings={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Review render plan' }))
+    await screen.findByText('900 × 900 px')
+    fireEvent.click(screen.getByRole('button', { name: 'Queue high-resolution render' }))
+
+    expect(await screen.findByText('Queued · position 1')).toBeTruthy()
+    expect(window.localStorage.getItem('turing-pattern.render-job.v1')).toBe('job-123')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 })

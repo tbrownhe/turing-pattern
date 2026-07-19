@@ -14,7 +14,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from PIL import Image, PngImagePlugin
 from pydantic import ValidationError
 from starlette.websockets import WebSocketDisconnect
@@ -37,6 +37,13 @@ from app.config import Settings, settings
 from app.core.engine import SimulationError, TuringSimulator
 from app.core.models import ENGINE_VERSION
 from app.observability import configure_logging
+from app.render_jobs import (
+    ClientRenderLimitError,
+    RenderArtifactUnavailableError,
+    RenderJobManager,
+    RenderJobNotFoundError,
+    RenderQueueFullError,
+)
 from app.runtime import ComputeRuntime
 
 logger = logging.getLogger(__name__)
@@ -110,8 +117,19 @@ def _render_plan(payload: RenderPlanRequest, config: Settings) -> dict[str, obje
     height_inches = payload.height if payload.unit == "in" else payload.height / 2.54
     output_width = max(1, round(width_inches * ppi))
     output_height = max(1, round(height_inches * ppi))
-    simulation_width = ceil(output_width / config.render_upsample)
-    simulation_height = ceil(output_height / config.render_upsample)
+    target_simulation_width = ceil(output_width / config.render_upsample)
+    target_simulation_height = ceil(output_height / config.render_upsample)
+    if payload.framing == "crop":
+        simulation_width = simulation_height = max(
+            target_simulation_width, target_simulation_height
+        )
+    elif payload.framing == "fit":
+        simulation_width = simulation_height = min(
+            target_simulation_width, target_simulation_height
+        )
+    else:
+        simulation_width = target_simulation_width
+        simulation_height = target_simulation_height
     simulation_pixels = simulation_width * simulation_height
 
     issues: list[str] = []
@@ -124,6 +142,11 @@ def _render_plan(payload: RenderPlanRequest, config: Settings) -> dict[str, obje
         issues.append(
             "The numerical grid exceeds the configured "
             f"{config.max_render_simulation_pixels:,}-cell limit."
+        )
+    if payload.feature_scale != 1.0:
+        issues.append(
+            "Fine and Bold feature scales remain unavailable until their numerical "
+            "mapping is calibrated. Use Original 1x to queue this render."
         )
 
     preview_pixels = 256 * 256
@@ -150,7 +173,11 @@ def _render_plan(payload: RenderPlanRequest, config: Settings) -> dict[str, obje
         "quality_label": QUALITY_LABELS[payload.quality],
         "pixels_per_inch": ppi,
         "feature_scale": payload.feature_scale,
-        "scale_model_status": "calibration-required",
+        "scale_model_status": (
+            "reference-validated"
+            if payload.feature_scale == 1.0
+            else "calibration-required"
+        ),
         "development_steps": payload.development_steps,
         "framing": payload.framing,
         "output_width": output_width,
@@ -253,6 +280,9 @@ def create_app(config: Settings = settings) -> FastAPI:
         configure_logging(config.log_level)
         runtime = ComputeRuntime(config)
         application.state.runtime = runtime
+        render_jobs = RenderJobManager(config, runtime)
+        application.state.render_jobs = render_jobs
+        await render_jobs.start()
         monitor_stopped = asyncio.Event()
 
         async def monitor_event_loop() -> None:
@@ -273,6 +303,7 @@ def create_app(config: Settings = settings) -> FastAPI:
             monitor_stopped.set()
             monitor_task.cancel()
             await asyncio.gather(monitor_task, return_exceptions=True)
+            await render_jobs.close()
             runtime.close()
 
     application = FastAPI(
@@ -288,7 +319,7 @@ def create_app(config: Settings = settings) -> FastAPI:
         CORSMiddleware,
         allow_origins=list(config.allowed_origins),
         allow_credentials=False,
-        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
         allow_headers=["Content-Type"],
     )
 
@@ -323,6 +354,93 @@ def create_app(config: Settings = settings) -> FastAPI:
     @application.post("/api/v1/render-plans")
     async def plan_render(payload: RenderPlanRequest) -> dict[str, object]:
         return _render_plan(payload, config)
+
+    def get_render_job_or_404(
+        manager: RenderJobManager, job_id: str
+    ) -> dict[str, object]:
+        try:
+            return manager.get(job_id)
+        except RenderJobNotFoundError as error:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "render_not_found", "message": "Render job not found."},
+            ) from error
+
+    @application.post("/api/v1/renders", status_code=202)
+    async def queue_render(
+        payload: RenderPlanRequest, request: Request, response: Response
+    ) -> dict[str, object]:
+        plan = _render_plan(payload, config)
+        if not plan["accepted"]:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "render_plan_rejected",
+                    "message": "The render plan is not executable.",
+                    "issues": plan["issues"],
+                },
+            )
+        manager: RenderJobManager = request.app.state.render_jobs
+        forwarded = request.headers.get("x-real-ip")
+        client_key = forwarded or (request.client.host if request.client else "unknown")
+        try:
+            job = manager.enqueue(payload, plan, client_key)
+        except ClientRenderLimitError as error:
+            raise HTTPException(
+                status_code=429,
+                detail={"code": "client_render_limit", "message": str(error)},
+                headers={"Retry-After": "5"},
+            ) from error
+        except RenderQueueFullError as error:
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "render_queue_full", "message": str(error)},
+                headers={"Retry-After": "5"},
+            ) from error
+        response.headers["Location"] = f"/api/v1/renders/{job['id']}"
+        response.headers["Cache-Control"] = "no-store"
+        return job
+
+    @application.get("/api/v1/renders/{job_id}")
+    async def render_status(job_id: str, request: Request) -> dict[str, object]:
+        manager: RenderJobManager = request.app.state.render_jobs
+        return get_render_job_or_404(manager, job_id)
+
+    @application.delete("/api/v1/renders/{job_id}", status_code=202)
+    async def cancel_render(job_id: str, request: Request) -> dict[str, object]:
+        manager: RenderJobManager = request.app.state.render_jobs
+        try:
+            return manager.cancel(job_id)
+        except RenderJobNotFoundError as error:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "render_not_found", "message": "Render job not found."},
+            ) from error
+
+    @application.get("/api/v1/renders/{job_id}/artifact")
+    async def render_artifact(job_id: str, request: Request) -> FileResponse:
+        manager: RenderJobManager = request.app.state.render_jobs
+        try:
+            path, filename = manager.artifact(job_id)
+        except RenderJobNotFoundError as error:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "render_not_found", "message": "Render job not found."},
+            ) from error
+        except RenderArtifactUnavailableError as error:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "artifact_unavailable",
+                    "message": "The render artifact is not available.",
+                },
+            ) from error
+        return FileResponse(
+            path,
+            media_type="image/png",
+            filename=filename,
+            headers={"Cache-Control": "private, no-store"},
+        )
 
     @application.post("/api/v1/time-studies")
     async def create_time_study(

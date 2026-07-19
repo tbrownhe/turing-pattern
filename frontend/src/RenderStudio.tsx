@@ -39,6 +39,30 @@ interface TimeStudyResponse {
   checkpoints: TimeStudyCheckpoint[]
 }
 
+type RenderJobState =
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'expired'
+  | 'interrupted'
+
+interface RenderJob {
+  id: string
+  state: RenderJobState
+  progress_steps: number
+  requested_steps: number
+  progress_percent: number
+  queue_position: number | null
+  cancel_requested: boolean
+  error: string | null
+  artifact_available: boolean
+  artifact_url: string | null
+  expires_at: string | null
+  plan: RenderPlan
+}
+
 interface RenderStudioProps {
   recipe: PatternRecipe
   liveSteps: number
@@ -55,6 +79,8 @@ const qualityOptions: ReadonlyArray<{
   { value: 'studio', label: 'Studio', detail: '300 pixels per inch' },
   { value: 'fine', label: 'Fine', detail: '600 pixels per inch' },
 ]
+
+const RENDER_JOB_STORAGE_KEY = 'turing-pattern.render-job.v1'
 
 function apiError(value: unknown, fallback: string): string {
   if (typeof value !== 'object' || value === null) return fallback
@@ -103,6 +129,42 @@ export default function RenderStudio({
   const [study, setStudy] = useState<TimeStudyResponse | null>(null)
   const [studyError, setStudyError] = useState('')
   const [studying, setStudying] = useState(false)
+  const [job, setJob] = useState<RenderJob | null>(null)
+  const [jobError, setJobError] = useState('')
+  const [queueing, setQueueing] = useState(false)
+
+  useEffect(() => {
+    const jobId = window.localStorage.getItem(RENDER_JOB_STORAGE_KEY)
+    if (!jobId) return
+    let disposed = false
+    fetch(`/api/v1/renders/${jobId}`)
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Saved render job was not found.')
+        return response.json() as Promise<RenderJob>
+      })
+      .then((savedJob) => {
+        if (!disposed) setJob(savedJob)
+      })
+      .catch(() => window.localStorage.removeItem(RENDER_JOB_STORAGE_KEY))
+    return () => {
+      disposed = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!job || !['queued', 'running'].includes(job.state)) return
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/v1/renders/${job.id}`)
+        const body: unknown = await response.json()
+        if (!response.ok) throw new Error(apiError(body, 'Render status is unavailable.'))
+        setJob(body as RenderJob)
+      } catch (error) {
+        setJobError(error instanceof Error ? error.message : 'Render status is unavailable.')
+      }
+    }, 1000)
+    return () => window.clearTimeout(timer)
+  }, [job])
 
   useEffect(() => {
     if (handoffVersion === 0) return
@@ -172,6 +234,40 @@ export default function RenderStudio({
       setStudyError(error instanceof Error ? error.message : 'The time study could not run.')
     } finally {
       setStudying(false)
+    }
+  }
+
+  const queueRender = async () => {
+    setQueueing(true)
+    setJobError('')
+    try {
+      const response = await fetch('/api/v1/renders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody()),
+      })
+      const body: unknown = await response.json()
+      if (!response.ok) throw new Error(apiError(body, 'The render could not be queued.'))
+      const queuedJob = body as RenderJob
+      setJob(queuedJob)
+      window.localStorage.setItem(RENDER_JOB_STORAGE_KEY, queuedJob.id)
+    } catch (error) {
+      setJobError(error instanceof Error ? error.message : 'The render could not be queued.')
+    } finally {
+      setQueueing(false)
+    }
+  }
+
+  const cancelRender = async () => {
+    if (!job) return
+    setJobError('')
+    try {
+      const response = await fetch(`/api/v1/renders/${job.id}`, { method: 'DELETE' })
+      const body: unknown = await response.json()
+      if (!response.ok) throw new Error(apiError(body, 'The render could not be cancelled.'))
+      setJob(body as RenderJob)
+    } catch (error) {
+      setJobError(error instanceof Error ? error.message : 'The render could not be cancelled.')
     }
   }
 
@@ -246,7 +342,7 @@ export default function RenderStudio({
                 </label>
               ))}
             </div>
-            <p className="field-help">Recorded in the plan now; numerical scale calibration is required before queued execution.</p>
+            <p className="field-help">Original 1× is executable now. Fine and Bold remain blocked until their numerical scale mappings are calibrated.</p>
           </fieldset>
 
           <fieldset className="render-fieldset">
@@ -316,10 +412,35 @@ export default function RenderStudio({
                   </ul>
                 )}
                 <p className="field-help">Estimate calibrated from the OptiPlex 256² benchmark. Queue conditions and cache behavior can change actual time.</p>
-                <button className="button button-primary button-full" disabled>
-                  Queue high-resolution render
+                <button
+                  className="button button-primary button-full"
+                  type="button"
+                  onClick={queueRender}
+                  disabled={!plan.accepted || queueing || Boolean(job && ['queued', 'running'].includes(job.state))}
+                >
+                  {queueing ? 'Joining bounded queue…' : 'Queue high-resolution render'}
                 </button>
-                <p className="queue-note">Bounded, recoverable job submission is the next P2.2 implementation. No long-running HTTP request is started here.</p>
+                {job && (
+                  <div className={`job-status job-${job.state}`} aria-live="polite">
+                    <div className="job-status-heading">
+                      <strong>{job.state === 'queued' ? `Queued${job.queue_position ? ` · position ${job.queue_position}` : ''}` : job.state}</strong>
+                      <span>{job.progress_steps.toLocaleString()} / {job.requested_steps.toLocaleString()} steps</span>
+                    </div>
+                    <progress max={100} value={job.progress_percent}>{job.progress_percent}%</progress>
+                    {job.cancel_requested && <p>Cancellation requested; the current numerical chunk will finish safely.</p>}
+                    {job.error && <p className="form-error">{job.error}</p>}
+                    <div className="job-actions">
+                      {['queued', 'running'].includes(job.state) && (
+                        <button className="button button-small" type="button" onClick={cancelRender}>Cancel and discard</button>
+                      )}
+                      {job.artifact_available && job.artifact_url && (
+                        <a className="button button-primary" href={job.artifact_url}>Download completed PNG</a>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {jobError && <p className="form-error" role="alert">{jobError}</p>}
+                <p className="queue-note">Jobs persist across refreshes and API restarts. The worker admits one bounded job at a time and releases completed artifacts after their configured lifetime.</p>
               </>
             ) : (
               <p className="empty-result">Review the plan to resolve physical dimensions into a bounded numerical grid before any expensive work starts.</p>

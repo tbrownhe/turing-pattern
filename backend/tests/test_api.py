@@ -24,7 +24,7 @@ ORIGIN = "http://testserver"
 
 
 @pytest.fixture
-def client():
+def client(tmp_path):
     config = replace(
         settings,
         allowed_origins=(ORIGIN,),
@@ -37,6 +37,9 @@ def client():
         max_compute_jobs=1,
         compute_workers=1,
         max_compute_waiters=0,
+        render_data_dir=str(tmp_path / "renders"),
+        max_render_job_history=8,
+        render_chunk_steps=10,
     )
     with TestClient(create_app(config)) as test_client:
         yield test_client
@@ -177,10 +180,130 @@ def test_render_plan_resolves_physical_dimensions_and_rejects_oversized_work(cli
     assert accepted["output_width"] == 1800
     assert accepted["simulation_width"] == 900
     assert accepted["bicubic_upsample"] == 2
-    assert accepted["scale_model_status"] == "calibration-required"
+    assert accepted["scale_model_status"] == "reference-validated"
     assert accepted["estimated_seconds_high"] > accepted["estimated_seconds_low"]
     assert oversized["accepted"] is False
     assert oversized["issues"]
+
+
+def test_render_job_completes_persists_metadata_and_serves_an_artifact(client):
+    payload = {
+        "controls": CONTROLS,
+        "seed": 19,
+        "width": 0.1,
+        "height": 0.1,
+        "unit": "in",
+        "quality": "draft",
+        "feature_scale": 1.0,
+        "development_steps": 100,
+        "framing": "crop",
+    }
+
+    queued = client.post("/api/v1/renders", json=payload)
+    assert queued.status_code == 202
+    assert queued.headers["location"].startswith("/api/v1/renders/")
+    job = queued.json()
+    for _ in range(100):
+        job = client.get(f"/api/v1/renders/{job['id']}").json()
+        if job["state"] in {"completed", "failed"}:
+            break
+
+    assert job["state"] == "completed", job
+    assert job["progress_steps"] == 100
+    assert job["artifact_available"] is True
+    artifact = client.get(job["artifact_url"])
+    assert artifact.status_code == 200
+    assert artifact.headers["content-type"] == "image/png"
+    image = Image.open(BytesIO(artifact.content))
+    metadata = json.loads(image.text["TuringParams"])
+    assert metadata["actual_steps"] == 100
+    assert metadata["recipe"]["seed"] == 19
+    assert metadata["plan"]["output_width"] == 15
+
+    repeated = client.post("/api/v1/renders", json=payload).json()
+    for _ in range(100):
+        repeated = client.get(f"/api/v1/renders/{repeated['id']}").json()
+        if repeated["state"] in {"completed", "failed"}:
+            break
+    repeated_artifact = client.get(repeated["artifact_url"])
+    assert repeated["state"] == "completed"
+    assert repeated_artifact.content == artifact.content
+
+
+def test_render_job_can_be_cancelled_while_waiting_for_compute(client):
+    payload = {
+        "controls": CONTROLS,
+        "seed": 19,
+        "width": 0.1,
+        "height": 0.1,
+        "unit": "in",
+        "quality": "draft",
+        "feature_scale": 1.0,
+        "development_steps": 100,
+        "framing": "crop",
+    }
+    with client.websocket_connect("/ws", headers={"origin": ORIGIN}) as websocket:
+        websocket.send_json(
+            {
+                "type": "start",
+                "protocol_version": 1,
+                "controls": CONTROLS,
+                "seed": 7,
+            }
+        )
+        assert websocket.receive_json()["type"] == "ready"
+        queued = client.post("/api/v1/renders", json=payload).json()
+        cancelled = client.delete(f"/api/v1/renders/{queued['id']}")
+
+    assert cancelled.status_code == 202
+    assert cancelled.json()["state"] == "cancelled"
+    assert client.get(f"/api/v1/renders/{queued['id']}/artifact").status_code == 409
+
+
+def test_uncalibrated_feature_scale_cannot_enter_the_queue(client):
+    response = client.post(
+        "/api/v1/renders",
+        json={
+            "controls": CONTROLS,
+            "seed": 19,
+            "width": 0.1,
+            "height": 0.1,
+            "unit": "in",
+            "quality": "draft",
+            "feature_scale": 2.0,
+            "development_steps": 100,
+            "framing": "crop",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "render_plan_rejected"
+
+
+def test_terminal_render_history_is_bounded(client):
+    payload = {
+        "controls": CONTROLS,
+        "seed": 23,
+        "width": 0.1,
+        "height": 0.1,
+        "unit": "in",
+        "quality": "draft",
+        "feature_scale": 1.0,
+        "development_steps": 100,
+        "framing": "crop",
+    }
+    completed_ids = []
+    for seed in range(9):
+        job = client.post("/api/v1/renders", json={**payload, "seed": seed}).json()
+        for _ in range(100):
+            job = client.get(f"/api/v1/renders/{job['id']}").json()
+            if job["state"] in {"completed", "failed"}:
+                break
+        assert job["state"] == "completed", job
+        completed_ids.append(job["id"])
+
+    assert client.get(f"/api/v1/renders/{completed_ids[0]}").status_code == 404
+    assert client.get(f"/api/v1/renders/{completed_ids[-1]}").status_code == 200
 
 
 def test_time_study_runs_one_bounded_simulation_and_returns_ordered_images(client):

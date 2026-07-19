@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from dataclasses import dataclass
 
 
@@ -72,6 +73,14 @@ class Settings:
     max_render_simulation_pixels: int
     max_render_output_edge: int
     benchmark_iterations_per_second: float
+    render_data_dir: str
+    max_render_queue: int
+    max_render_jobs_per_client: int
+    render_job_timeout_seconds: float
+    render_artifact_ttl_seconds: int
+    max_render_artifacts: int
+    max_render_job_history: int
+    render_chunk_steps: int
     log_level: str
 
     @classmethod
@@ -136,6 +145,37 @@ class Settings:
                 421.2,
                 minimum=1.0,
                 maximum=100_000.0,
+            ),
+            render_data_dir=os.getenv(
+                "TURING_RENDER_DATA_DIR",
+                os.path.join(tempfile.gettempdir(), "turing-pattern-renders"),
+            ),
+            max_render_queue=_get_int(
+                "TURING_MAX_RENDER_QUEUE", 3, minimum=1, maximum=32
+            ),
+            max_render_jobs_per_client=_get_int(
+                "TURING_MAX_RENDER_JOBS_PER_CLIENT", 2, minimum=1, maximum=8
+            ),
+            render_job_timeout_seconds=_get_float(
+                "TURING_RENDER_JOB_TIMEOUT_SECONDS",
+                900.0,
+                minimum=10.0,
+                maximum=7200.0,
+            ),
+            render_artifact_ttl_seconds=_get_int(
+                "TURING_RENDER_ARTIFACT_TTL_SECONDS",
+                86_400,
+                minimum=300,
+                maximum=604_800,
+            ),
+            max_render_artifacts=_get_int(
+                "TURING_MAX_RENDER_ARTIFACTS", 8, minimum=1, maximum=64
+            ),
+            max_render_job_history=_get_int(
+                "TURING_MAX_RENDER_JOB_HISTORY", 64, minimum=8, maximum=512
+            ),
+            render_chunk_steps=_get_int(
+                "TURING_RENDER_CHUNK_STEPS", 100, minimum=10, maximum=1000
             ),
             log_level=_get_log_level("TURING_LOG_LEVEL"),
         )

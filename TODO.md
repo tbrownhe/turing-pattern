@@ -369,12 +369,12 @@ Done when:
   explicit feature scale, framing, and exact development steps. The validated plan
   separates numerical and output dimensions, the 2x bicubic finish, measured time
   range, estimated memory, resource class, and configured rejection reasons.
-- Feature scale is versioned in the plan but truthfully marked calibration-required;
-  the queue button remains disabled until P2.2 provides bounded, recoverable jobs and
-  a measured spatial-scale implementation.
+- Feature scale is versioned in the plan. Original 1x is executable; Fine 0.5x and
+  Bold 2x remain truthfully blocked until a measured spatial-scale implementation is
+  available.
 - Keep grayscale PNG first. Threshold/invert/levels, transparent blackwork, palette
   mapping, and seamless tiling remain demand-driven follow-ups after the core job
-  path. P2.2 owns queued/running/progress/cancel/expiry states and artifact metadata.
+  path. P2.2 supplies queued/running/progress/cancel/expiry states and artifact metadata.
 
 Done when:
 
@@ -384,26 +384,23 @@ Done when:
 - Download never points at the placeholder or a stale preview and clearly states its
   pixel dimensions.
 
-### [ ] P2.2 Implement high-resolution rendering as a bounded job system
+### [x] P2.2 Implement high-resolution rendering as a bounded job system
 
-- Calibrate and version the 0.5x/1x/2x feature-scale mapping before enabling the
-  queue. Store both user-facing development steps and any derived integrator steps.
-- `POST /api/v1/renders` validates a complete recipe and returns a job ID. Add status,
-  cancellation, and artifact endpoints. Initially allow one running job and a small
-  finite queue; tune only from benchmark data.
-- Keep job metadata in SQLite if jobs must survive API restarts; a single-box service
-  does not need Redis merely to look professional. On restart, mark interrupted jobs
-  clearly and clean partial artifacts.
-- Enforce per-job time, memory, dimensions, pixels, iterations, storage, per-IP queue,
-  and artifact-lifetime quotas. Stream files from disk rather than retaining all
-  results in API memory.
-- Generate into a private temporary path, atomically publish a completed file, and
-  periodically delete expired jobs/artifacts. Never use user text as a filesystem path.
-- Consider tiling/streaming only after testing whether the numerical boundary and
-  global normalization make it visually correct. Do not claim arbitrary resolution
-  while holding multiple full-size float arrays in RAM.
-- On process/container shutdown, stop admission, cancel or safely finish current work,
-  and remove incomplete files.
+- Added persistent SQLite job metadata, one background worker, a finite waiting queue,
+  per-client active limits, `202` submission, status, cancellation, and artifact APIs.
+- Jobs share the global compute gate and execute in configured numerical chunks so
+  progress, cooperative cancellation, timeout, and graceful shutdown checks cannot
+  create an unbounded work request.
+- Enforced dimensions, output edge, simulation cells, steps, runtime, queue, client,
+  artifact count, and artifact lifetime limits. Original 1x renders execute; requests
+  for uncalibrated 0.5x/2x feature scale are rejected before admission.
+- Generate into a private persistent volume, remove crash leftovers, atomically publish
+  completed PNGs, embed the exact recipe/plan/actual steps and physical resolution,
+  expire old files, and never derive filesystem paths from user text.
+- Refresh recovers the latest opaque job ID and state. API restart marks running work
+  interrupted while preserving queued work and completed artifacts.
+- Keep tiling/streaming deferred until periodic boundaries and global normalization can
+  be shown to remain visually correct.
 
 Done when:
 

@@ -15,8 +15,10 @@ docker compose ps
 
 The API runs as UID/GID 10001 and Nginx runs as its unprivileged `nginx` user on
 port 8080. Both root filesystems are read-only, all Linux capabilities are dropped,
-and only bounded `/tmp` tmpfs storage is writable. Do not add Uvicorn workers: the
-capacity gate is process-local.
+and only bounded `/tmp` tmpfs storage plus the backend's `/var/lib/turing`
+`render-data` volume are writable. That volume owns the render-job SQLite database
+and completed PNG artifacts; include it in backups. Do not add Uvicorn workers: the
+capacity gate and render worker are process-local.
 
 ## Diagnose
 
@@ -28,8 +30,9 @@ curl -fsS https://$DOMAIN/healthz
 
 `/readyz` and `/metrics` are backend-private and available from the host/container
 network. Metrics distinguish active/waiting work, rejections, numerical failures,
-step/encode/render time, event-loop lag, bytes per frame, and RSS. Session/request
-IDs appear only in structured logs, never as metric labels.
+render jobs queued/started/completed/cancelled/failed, step/encode/render time,
+event-loop lag, bytes per frame, and RSS. Session/request IDs appear only in
+structured logs, never as metric labels.
 
 Useful commands:
 
@@ -63,8 +66,10 @@ docker compose ps
 curl -fsS https://$DOMAIN/healthz
 ```
 
-Rollback has no data migration in P1 because the service is stateless. Test this
-procedure in staging before each production release.
+Preserve the `render-data` volume during rollback. The current schema is additive;
+startup retains queued and completed jobs and marks work that was running during a
+restart as interrupted. A future incompatible schema change must include an explicit
+migration and rollback procedure. Test this procedure in staging before each release.
 
 ## Maintenance
 
@@ -73,4 +78,9 @@ procedure in staging before each production release.
 - Quarterly: run the OptiPlex load test, rollback drill, and 30-minute browser
   memory session.
 - After every deploy: verify health, one WebSocket frame, security headers, and one
-  deterministic PNG recipe using `scripts/smoke_test.py`.
+  deterministic PNG recipe using `scripts/smoke_test.py`, then submit and download a
+  small queued high-resolution render.
+- Regularly verify free space on the Docker volume. Completed artifacts are bounded
+  by both `TURING_MAX_RENDER_ARTIFACTS` and
+  `TURING_RENDER_ARTIFACT_TTL_SECONDS`, and terminal metadata is bounded by
+  `TURING_MAX_RENDER_JOB_HISTORY`; do not manually edit `render-jobs.sqlite3`.

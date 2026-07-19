@@ -11,7 +11,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 RUN groupadd --system --gid 10001 turing \
-    && useradd --system --uid 10001 --gid turing --no-create-home turing
+    && useradd --system --uid 10001 --gid turing --no-create-home turing \
+    && install -d -o turing -g turing /var/lib/turing
 
 WORKDIR /app
 COPY requirements.lock .
