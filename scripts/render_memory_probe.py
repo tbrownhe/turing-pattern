@@ -37,6 +37,8 @@ def request(
             return response.status, response.read(), dict(response.headers)
     except urllib.error.HTTPError as error:
         return error.code, error.read(), dict(error.headers)
+    except urllib.error.URLError as error:
+        raise ConnectionError(f"could not reach {url}: {error.reason}") from error
 
 
 def request_json(
@@ -91,6 +93,11 @@ def main() -> None:
     }
     plan_status, plan = request_json(f"{base_url}/api/v1/render-plans", payload=payload)
     if plan_status != 200 or not plan.get("accepted"):
+        if plan_status == 404:
+            raise SystemExit(
+                "render-plan endpoint returned HTTP 404; rebuild the deployed backend "
+                "from the commit containing P2.2 before running this probe"
+            )
         raise SystemExit(f"maximum-grid plan was rejected: HTTP {plan_status} {plan}")
 
     submit_status, job = request_json(f"{base_url}/api/v1/renders", payload=payload)
@@ -131,9 +138,13 @@ def main() -> None:
     if job["state"] != "completed":
         raise SystemExit(f"maximum-grid render ended in {job['state']}: {job['error']}")
     artifact_status, artifact, headers = request(f"{base_url}{job['artifact_url']}")
+    artifact_content_type = next(
+        (value for name, value in headers.items() if name.lower() == "content-type"),
+        "",
+    )
     if (
         artifact_status != 200
-        or not headers.get("Content-Type", "").startswith("image/png")
+        or not artifact_content_type.startswith("image/png")
         or not artifact.startswith(b"\x89PNG\r\n\x1a\n")
     ):
         raise SystemExit("maximum-grid artifact was not a valid PNG response")

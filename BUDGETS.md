@@ -50,19 +50,24 @@ The memory probe requests a 2,048 x 2,048 PNG backed by the largest currently va
 evolution, is the relevant worst-case memory condition. It samples private backend
 metrics while also checking public health latency and the final PNG.
 
-On the OptiPlex from the deployed checkout:
+The probe is a client of the real backend; it does not start an API server itself.
+Build and start the deployed backend, then stream the checked-in probe into that
+exact running container:
 
 ```console
-docker compose run --rm --no-deps \
-  -v "$PWD:/workspace:ro" \
-  backend \
-  python /workspace/scripts/render_memory_probe.py \
-  --url http://frontend:8080 \
-  --metrics-url http://backend:8000/metrics
+docker compose up -d --build backend
+docker compose exec -T backend \
+  python - \
+  --url http://127.0.0.1:8000 \
+  --metrics-url http://127.0.0.1:8000/metrics \
+  < scripts/render_memory_probe.py
 ```
 
+This avoids creating a second container with the `backend` service identity and
+guarantees that the API and metrics belong to the deployed process being measured.
 The default calculation assumes the current 2 GiB backend limit. Pass
-`--memory-limit-mb` if production uses a different limit.
+`--memory-limit-mb` before the input redirection if production uses a different
+limit.
 
 ## Short development validation
 
