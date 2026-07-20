@@ -30,7 +30,7 @@ cd frontend
 npm ci
 npx playwright install chromium
 node scripts/experience-budget.mjs \
-  --url https://turing.tobiasbrownheft.xyz \
+  --url https://turing.example.com \
   --duration 1800 \
   --sample-interval 5 \
   --activity-interval 300 \

@@ -87,6 +87,21 @@ h1 {
   background: var(--danger);
 }
 
+.site-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.site-footer a {
+  color: inherit;
+}
+
 .lab {
   display: grid;
   grid-template-columns: minmax(260px, 0.72fr) minmax(360px, 1.45fr);
@@ -856,6 +871,10 @@ input[type="range"] {
 
   .advanced-panel summary {
     align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .site-footer {
     flex-direction: column;
   }
 }

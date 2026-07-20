@@ -1,0 +1,23 @@
+name: Feature request
+description: Suggest an improvement to exploration, rendering, or self-hosting.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What would this help you do?
+      description: Start with the creative or operational need rather than a particular implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Suggested approach
+      description: Describe the interaction or behavior you have in mind.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Note any current workflow or workaround you have tried.

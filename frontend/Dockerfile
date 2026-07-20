@@ -8,6 +8,10 @@ RUN npm run build
 
 FROM nginx:1.29.8-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de
 
+ARG APP_VERSION=1.0.0
+LABEL org.opencontainers.image.title="Gray-Scott Turing Pattern frontend" \
+      org.opencontainers.image.version=$APP_VERSION
+
 COPY nginx-main.conf /etc/nginx/nginx.conf
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=builder /app/dist /usr/share/nginx/html

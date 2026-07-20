@@ -343,4 +343,15 @@ describe('live controls', () => {
 
     expect(websocket.sent).toHaveLength(sentBefore)
   })
+
+  it('publishes the release and support contact', () => {
+    render(<App />)
+
+    expect(screen.getByText('Application 1.0.0 · Engine 2.0.0')).toBeTruthy()
+    expect(
+      screen
+        .getByRole('link', { name: 'Project feedback and issues' })
+        .getAttribute('href'),
+    ).toBe('https://github.com/tbrownhe/turing-pattern/issues/new/choose')
+  })
 })

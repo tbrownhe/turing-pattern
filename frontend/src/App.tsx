@@ -65,6 +65,8 @@ const statusText: Record<ConnectionState, string> = {
 }
 
 const HISTORY_LIMIT = 30
+const APPLICATION_VERSION =
+  import.meta.env.VITE_APP_VERSION || 'development'
 
 interface ComparisonSnapshot {
   recipe: PatternRecipe
@@ -985,6 +987,17 @@ function App() {
         handoffVersion={renderHandoffVersion}
         onImportLiveSettings={handOffToRenderer}
       />
+
+      <footer className="site-footer">
+        <span>Application {APPLICATION_VERSION} · Engine {CURRENT_ENGINE_VERSION}</span>
+        <a
+          href="https://github.com/tbrownhe/turing-pattern/issues/new/choose"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Project feedback and issues
+        </a>
+      </footer>
     </main>
   )
 }

@@ -19,6 +19,7 @@ from PIL import Image, PngImagePlugin
 from pydantic import ValidationError
 from starlette.websockets import WebSocketDisconnect
 
+from app import APP_VERSION
 from app.api.schemas import (
     ClientMessage,
     ControlsMessage,
@@ -313,7 +314,7 @@ def create_app(config: Settings = settings) -> FastAPI:
 
     application = FastAPI(
         title="Turing Pattern API",
-        version="1.0.0",
+        version=APP_VERSION,
         docs_url="/docs" if config.docs_enabled else None,
         redoc_url="/redoc" if config.docs_enabled else None,
         openapi_url="/openapi.json" if config.docs_enabled else None,

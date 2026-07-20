@@ -14,18 +14,19 @@ an expert can tune every meaningful parameter, and either person can export the
 same result later from a recorded seed and parameter set. One abusive or malformed
 client cannot make the site unavailable to everyone else.
 
-The recommended architecture is:
+The production architecture is deliberately modest and evidence-led:
 
 ```text
-browser-side live preview (preferred) ----> shareable parameters + seed
-                 |                                      |
-                 +----> bounded render API ----> one queued high-resolution job
-                                                at a time (initially)
+server-side live preview ----> shareable parameters + seed
+            |                               |
+            +----> bounded render API ----> one queued high-resolution job
+                                           at a time
 ```
 
-Keep the current server-side live mode as a fallback until a WebGL2/WebGPU or WASM
-preview proves itself on representative browsers. Do not increase public server
-concurrency until it has been measured on the OptiPlex 5060.
+The measured server-side live mode remains the default while it meets the published
+experience and capacity budgets. Browser-side WebGL/WASM work is a demand-triggered
+option, not a prerequisite for a good product. Do not increase public server
+concurrency until it has been measured on the target host.
 
 ## Audit snapshot
 
@@ -493,7 +494,14 @@ Done when:
 
 ## P3 — Polish, operations, and community
 
-### [ ] P3.1 Repair documentation and contributor experience
+### [x] P3.1 Repair documentation and contributor experience
+
+Completed on the `overhaul` branch. The root guide now carries the tattoo origin,
+current product screenshot, architecture, scientific/export contract, measured host
+expectations, and links into dedicated benchmark, budget, privacy, reporting, and
+operations documents. The frontend boilerplate was replaced with its actual module,
+test, same-origin, protocol, and responsive-UI contracts. The operations runbook now
+includes backup/restore and incident guidance.
 
 - Replace the stale root instructions (`conda install -f`, `src/turing.py`) with the
   tested current local, Compose, test, benchmark, and production workflows.
@@ -507,7 +515,15 @@ Done when:
 - Add screenshots and tell the tattoo origin story prominently; it is the most human
   and memorable reason for the project to exist.
 
-### [ ] P3.2 Add release and maintenance discipline
+### [x] P3.2 Add release and maintenance discipline
+
+Completed for application release `1.0.0`. Application and numerical-engine versions
+are explicit and independent; both images carry OCI version labels, and production
+uses documented immutable release/SHA tags. The operations runbook covers staging
+and post-deploy smoke tests, rollback, dependency and quarterly drills, backup and
+incident handling. Privacy/retention is published, the live UI handles busy/backend
+maintenance states without losing recipe controls, and the repository publishes
+public issue and private security-reporting paths.
 
 - Use semantic application/engine versions and immutable container tags.
 - Add a staging smoke test, production post-deploy health check, and rollback command.
@@ -524,7 +540,7 @@ daily application aggregates beside render metadata; the separate Compose
 `reporter` profile combines them with Cloudflare hostname aggregates and sends a
 plain-text SMTP digest. Delivery is strict at-most-once, with the claim committed
 before SMTP. Configuration, dry-run, secret permissions, privacy scope, and the
-systemd timer are documented in `REPORTING.md` and `PRIVACY.md`.
+systemd timer are documented in `docs/REPORTING.md` and `docs/PRIVACY.md`.
 
 - Use Cloudflare's aggregated hostname analytics for estimated visits, requests, and
   transfer rather than storing visitor IP addresses or inventing user identities.
@@ -552,9 +568,9 @@ Done when:
 
 Production close-out:
 
-- [ ] Create the least-privilege Cloudflare analytics token and SMTP app password on
-  `silicide`, then run the documented test email and dry run and verify both data
-  sources.
+- [x] Create the least-privilege Cloudflare analytics token and SMTP app password on
+  the production server, then run the documented test email and dry run and verify
+  both data sources.
 - [ ] Send one real digest, immediately invoke the job again, and verify the second
   invocation reports that the date is already claimed without sending another mail.
 - [ ] Install/enable `turing-report.timer` and confirm its first scheduled run in the

@@ -28,8 +28,8 @@ def report_settings(**overrides):
         "hostname": "turing.example.com",
         "cloudflare_zone_id": "zone-id",
         "cloudflare_token": "token",
-        "report_to": "owner@example.com",
-        "report_from": "reports@example.com",
+        "report_to": "owner-address",
+        "report_from": "reports-address",
         "smtp_host": "smtp.example.com",
         "smtp_port": 587,
         "smtp_security": "starttls",
@@ -130,15 +130,15 @@ def test_email_mode_does_not_open_or_claim_the_usage_store(monkeypatch, tmp_path
         )
 
     monkeypatch.setenv("TURING_RENDER_DATA_DIR", str(tmp_path / "unused"))
-    monkeypatch.setenv("TURING_REPORT_TO", "owner@example.com")
-    monkeypatch.setenv("TURING_REPORT_FROM", "reports@example.com")
+    monkeypatch.setenv("TURING_REPORT_TO", "owner-address")
+    monkeypatch.setenv("TURING_REPORT_FROM", "reports-address")
     monkeypatch.setenv("TURING_SMTP_HOST", "smtp.example.com")
     monkeypatch.delenv("TURING_SMTP_USER", raising=False)
     monkeypatch.setattr(reporting, "send_email", fake_send)
 
     assert reporting.main(["--test-email", "--date", "2026-07-19"]) == 0
     assert captured == {
-        "to": "owner@example.com",
+        "to": "owner-address",
         "day": date(2026, 7, 19),
         "body": "Turing Pattern reporting SMTP configuration succeeded.\n",
         "subject": "Turing Pattern reporting test",

@@ -14,3 +14,7 @@ process connection metadata according to their own configuration and policies.
 Completed render artifacts and their embedded recipes remain temporarily available
 under the configured artifact retention policy so the requesting browser can download
 them. This operational storage is separate from daily reporting.
+
+Use the repository's GitHub Issues for non-sensitive questions and problem reports.
+Report security-sensitive concerns privately through the process in
+[SECURITY.md](../.github/SECURITY.md).

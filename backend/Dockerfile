@@ -7,6 +7,10 @@ RUN pip wheel --no-cache-dir --require-hashes --wheel-dir /wheels \
 
 FROM python:3.11-slim@sha256:db3ff2e1800a8581e2c48a27c3995339d47bdf046da21c7627accd3d51053a93
 
+ARG APP_VERSION=1.0.0
+LABEL org.opencontainers.image.title="Gray-Scott Turing Pattern backend" \
+      org.opencontainers.image.version=$APP_VERSION
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 

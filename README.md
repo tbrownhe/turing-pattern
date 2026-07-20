@@ -1,9 +1,17 @@
 # Gray-Scott Turing Pattern Lab
 
 An interactive reaction-diffusion playground for discovering organic textures and
-exporting reproducible patterns. This began as a local Python script for tattoo
-ideas; one of its patterns now lives on the author's arm. The current project turns
-that experiment into a deliberately small, self-hosted web application.
+exporting reproducible patterns.
+
+This began as a local Python script for exploring tattoo ideas. One generated
+pattern made the jump from pixels to skin and is tattooed on the author's arm. That
+origin still guides the product: experimentation should feel immediate, beautiful
+accidents should remain reproducible, and the final export should make sense to an
+artist who thinks in physical dimensions rather than pixels.
+
+![Gray-Scott Pattern Lab desktop interface](static/site-desktop.png)
+
+The order-disorder transition that inspired one of the included recipes:
 
 ![Turing pattern](static/turing.png)
 
@@ -29,10 +37,41 @@ that experiment into a deliberately small, self-hosted web application.
 - Same-origin production routing: Traefik exposes Nginx, and Nginx proxies `/api`
   and `/ws` to a private backend container.
 
-See [TODO.md](TODO.md) for the measured-performance, high-resolution, and eventual
-browser-side simulation roadmap. The WASM/WebGL exploration has intentionally not
-started yet; it will be treated as a learning-oriented prototype rather than a
-silent rewrite.
+See the [project roadmap](docs/ROADMAP.md) for the measured-performance,
+high-resolution, and eventual browser-side simulation roadmap. The WASM/WebGL
+exploration has intentionally not started yet; it will be treated as a
+learning-oriented prototype rather than a silent rewrite.
+
+The current application release is **1.0.0** and the numerical engine is **2.0.0**.
+Application, engine, WebSocket protocol, recipe, and render-format versions evolve
+independently so a UI release does not falsely imply a numerical change.
+
+## Architecture
+
+```text
+browser
+  |
+  v
+Traefik (TLS and edge limits)
+  |
+  v
+Nginx frontend ── /api and /ws ──> private FastAPI backend
+                                         |
+                    +--------------------+--------------------+
+                    |                    |                    |
+               live sessions       time studies       render worker
+                    +--------------------+--------------------+
+                                         |
+                             one bounded compute runtime
+                                         |
+                         SQLite metadata + expiring PNGs
+
+scheduled reporter ──> aggregate SQLite counters + Cloudflare analytics ──> SMTP
+```
+
+The browser uses one public origin. The backend is not published in production,
+and every numerical path shares the same process-local admission controller and
+bounded executor.
 
 ## Run locally with Docker
 
@@ -51,17 +90,17 @@ frontend proxy. In `.env`, set:
 
 ```dotenv
 TURING_LOCAL_BIND_ADDRESS=0.0.0.0
-TURING_LOCAL_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://192.168.1.71:3000
+TURING_LOCAL_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://192.168.1.50:3000
 ```
 
-Replace `192.168.1.71` if the development machine's address changes, then recreate
+Replace `192.168.1.50` with the development machine's address, then recreate
 the local containers:
 
 ```console
 docker compose -f docker-compose.local.yml up -d --build --force-recreate
 ```
 
-Open <http://192.168.1.71:3000> on the phone. If the page is still unreachable,
+Open <http://192.168.1.50:3000> on the phone. If the page is still unreachable,
 allow inbound TCP port 3000 on the development machine's **private** firewall
 profile and confirm both devices are on the same non-isolated LAN. Do not expose
 port 8000; Nginx already proxies `/api` and `/ws` to the private backend.
@@ -95,8 +134,8 @@ python scripts/check.py
 
 This uses the hash-locked Python dependency set and runs backend lint, formatting,
 type checking and tests plus frontend audit, tests, lint and build. See
-[BENCHMARK.md](BENCHMARK.md) for engine measurements and
-[docs/OPERATIONS.md](docs/OPERATIONS.md) for deployment, tuning and rollback.
+[engine benchmark](docs/BENCHMARK.md) for engine measurements and
+[operations runbook](docs/OPERATIONS.md) for deployment, tuning and rollback.
 The first run also downloads Playwright's pinned Chromium build for the real-browser
 live-frame smoke test.
 
@@ -164,6 +203,32 @@ The job API is `POST /api/v1/renders`, `GET`/`DELETE /api/v1/renders/{id}`, and
 `GET /api/v1/renders/{id}/artifact`. Submission returns `202` and a `Location` header;
 it never holds the request open for numerical work.
 
+## Numerical and export contract
+
+- Feed and kill interpolate from left (`F1`, `K1`) to right (`F2`, `K2`). Diffusion
+  interpolates from top (`Du1`, `Dv1`) to bottom (`Du2`, `Dv2`). Uniform mode makes
+  each endpoint pair equal.
+- The public safety bounds are 0–0.1 for feed/kill and 0–1 for diffusion. Those are
+  validation limits, not a promise that every combination makes an interesting or
+  numerically stable pattern; the curated presets are the useful starting region.
+- The live preview is a real 256×256 numerical simulation. Display zoom and contrast
+  change only presentation.
+- High-resolution output runs a new seeded simulation at its planned numerical grid
+  and then applies the configured 2× bicubic finish. It does not enlarge or reproduce
+  the transient live frame.
+- The same seed, controls, dimensions, development step, engine version, and framing
+  reproduce the same export on the supported engine. A state perturbation is not part
+  of a recipe and therefore intentionally breaks that reproducibility.
+- Original 1× feature scale is calibrated. Fine 0.5× and Bold 2× remain visible as
+  design intent but are rejected until their numerical mappings are measured.
+
+On the OptiPlex 5060, 100 iterations at 256×256 take about 0.24 seconds; the measured
+maximum 1024×1024 numerical grid takes about 4.46 seconds for 100 iterations and
+produces a 2048×2048 output after the bicubic finish. Render time scales roughly with
+both numerical pixels and development steps. The planner shows a conservative range;
+the full measurements and hardware context live in the
+[engine benchmark](docs/BENCHMARK.md) and [experience budgets](docs/BUDGETS.md).
+
 ## Public protocol
 
 The browser opens `/ws` and first sends protocol version 1:
@@ -198,11 +263,12 @@ count, and applied control revision. The browser keeps at most one frame waiting
 decode and paints only the newest paired frame, so overload cannot grow a stale-frame
 queue or corrupt the displayed development reference.
 
-Repeatable browser and maximum-grid server measurements are documented in
-[BUDGETS.md](BUDGETS.md).
+Repeatable browser and maximum-grid server measurements are documented in the
+[experience budgets](docs/BUDGETS.md).
 
-The optional daily operations digest is documented in [REPORTING.md](REPORTING.md),
-and the exact aggregate telemetry it retains is described in [PRIVACY.md](PRIVACY.md).
+The optional daily operations digest is documented in the
+[reporting runbook](docs/REPORTING.md), and the exact aggregate telemetry it retains
+is described in the [privacy statement](docs/PRIVACY.md).
 
 The fixed-size PNG endpoint accepts the same controls and a seed:
 
@@ -286,7 +352,7 @@ entrypoints named `http` and `https`, plus a certificate resolver named `le`.
 
 ```console
 cp .env.example .env
-# edit DOMAIN and STACK_NAME
+# edit DOMAIN and STACK_NAME; use an immutable release or commit-SHA TAG
 docker compose config
 docker compose up -d --build
 ```
@@ -294,6 +360,23 @@ docker compose up -d --build
 Only the frontend joins `traefik-public`. The backend is reachable from Nginx on the
 private Compose network and has health checks, CPU/memory/PID limits, bounded logs,
 and `no-new-privileges` enabled.
+
+## Documentation
+
+- [Frontend contributor guide](docs/FRONTEND.md)
+- [Engine benchmark](docs/BENCHMARK.md)
+- [Experience and capacity budgets](docs/BUDGETS.md)
+- [Operations, release, backup, and incident runbook](docs/OPERATIONS.md)
+- [Daily aggregate reporting](docs/REPORTING.md)
+- [Privacy and retention](docs/PRIVACY.md)
+- [Roadmap and completed audit history](docs/ROADMAP.md)
+- [Security policy](.github/SECURITY.md)
+
+## Feedback and security
+
+Use [GitHub Issues](https://github.com/tbrownhe/turing-pattern/issues) for bugs,
+feature ideas, and documentation improvements. Please follow the
+[security policy](.github/SECURITY.md) instead of publishing vulnerability details.
 
 ## License
 

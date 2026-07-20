@@ -8,10 +8,9 @@ request and does not need the frontend or backend containers to be running.
 ## Configure it
 
 Create a custom Cloudflare API token with **Account > Account Analytics > Read** and
-limit its zone resources to the zone containing `tobiasbrownheft.xyz`, then copy the
-zone ID from the domain overview. Configure a generic SMTP relay; Gmail SMTP works
-with an app password when two-step verification is enabled, but the reporter is not
-tied to Gmail.
+limit its zone resources to the deployed zone, then copy the zone ID from the domain
+overview. Configure a generic SMTP relay; Gmail SMTP works with an app password when
+two-step verification is enabled, but the reporter is not tied to Gmail.
 
 References: [Cloudflare Analytics token configuration](https://developers.cloudflare.com/analytics/graphql-api/getting-started/authentication/api-token-auth/)
 and [Google's SMTP settings](https://support.google.com/a/answer/176600).
@@ -20,12 +19,12 @@ Add the non-secret values to `.env`:
 
 ```dotenv
 TURING_REPORT_TIMEZONE=America/Los_Angeles
-TURING_REPORT_TO=tbrownhe@gmail.com
-TURING_REPORT_FROM=tbrownhe@gmail.com
-TURING_SMTP_HOST=smtp.gmail.com
+TURING_REPORT_TO=recipient-address
+TURING_REPORT_FROM=sender-address
+TURING_SMTP_HOST=smtp.example.net
 TURING_SMTP_PORT=587
 TURING_SMTP_SECURITY=starttls
-TURING_SMTP_USER=tbrownhe@gmail.com
+TURING_SMTP_USER=smtp-account-name
 TURING_CLOUDFLARE_ZONE_ID=replace-with-zone-id
 TURING_REPORT_SECRETS_DIR=./secrets/reporting
 ```
@@ -80,7 +79,7 @@ inspect that day's data without altering its delivery record.
 Cloudflare errors do not suppress the application report; the email says analytics
 were unavailable. SMTP configuration errors do fail the one-shot job.
 
-## Schedule on silicide
+## Schedule on the server
 
 The repository includes a systemd one-shot service and timer configured for
 `/srv/turing`. Install and enable them:
