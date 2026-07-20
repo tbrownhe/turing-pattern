@@ -409,10 +409,10 @@ Done when:
 - Two identical recipes (including seed/engine version) produce reproducible outputs.
 - A render cannot make live/static/health traffic unavailable.
 
-### [ ] P2.3 Establish experience and performance budgets
+### [x] P2.3 Establish experience and performance budgets
 
-Measure on the production OptiPlex and a mid-range phone/laptop, then record budgets
-here rather than guessing from a development machine. Initial targets to validate:
+Production OptiPlex measurements, a 30-minute automated public-path browser soak,
+and a named iPhone interaction pass now support the accepted initial budgets:
 
 - Added applied-control revisions to frame metadata and the painted canvas so
   control-to-paint latency measures a frame that actually used the requested values.
@@ -420,11 +420,28 @@ here rather than guessing from a development machine. Initial targets to validat
   drops superseded work, exposes diagnostics, and cannot accumulate stale previews.
 - Added a repeatable Chromium study for first preview, control response, queue depth,
   retained heap, render progress, and public health/static latency, plus a
-  maximum-valid-grid backend RSS/event-loop probe. Short development runs validate
-  the instruments only; the 30-minute production/device baselines remain required.
+  maximum-valid-grid backend RSS/event-loop probe.
 - The production OptiPlex maximum 1,024 x 1,024 numerical grid peaked at 122,363,904
   bytes RSS (5.70% of the 2 GiB limit), with 0.66 ms maximum event-loop lag and
   1.00 ms health p95. The server-memory budget is validated with ample headroom.
+- The 30-minute public-path Chromium soak completed through Cloudflare with 223.97 ms
+  control-to-painted-frame p95, zero control timeouts, zero frame regressions,
+  515,608 bytes retained heap growth, and 25.20 ms public-health p95 during a render.
+  All automated experience targets passed.
+- The configured-capacity production probe admitted two live sessions, rejected one
+  excess session, sustained about 9.9 FPS per session, and returned all session slots.
+  Peak backend use was 1.32 cores and 72.18 MiB. A focused origin run returned the
+  expected two `503` render rejections with 2.83 ms health p95, zero probe errors,
+  and no numerical failures.
+- A roughly 15-minute iPhone 15 Pro pass on iOS 26.5.2 and Chrome 150.0.7871.113
+  consumed three battery percentage points, remained cool, logged no JavaScript
+  errors, recovered cleanly after a one-minute background interval, and completed,
+  downloaded, and opened a high-resolution render. Exact transient simulation state
+  did not survive reconnection, which is expected; the recipe remains the durable
+  contract.
+- The shorter high-end-phone pass is accepted alongside the automated 30-minute
+  mobile-viewport heap/queue trace. Longer and lower-end device coverage belongs to
+  P3.4 artist validation and does not block the initial production budget.
 
 - meaningful first preview within 2 seconds on a warm service;
 - visible response to a control change within 150 ms for browser-side preview, or
@@ -435,7 +452,23 @@ here rather than guessing from a development machine. Initial targets to validat
 - worst-case valid render stays below 70% of the container memory limit, leaving
   recovery headroom.
 
-### [ ] P2.4 Prototype browser-side live simulation (WebGL/WASM learning pass)
+### [ ] P2.4 Browser-side live simulation (deferred, demand-triggered)
+
+Decision recorded after the production 30-minute soak: keep the server-side live
+simulation as the production default. It meets every current experience budget, and
+a browser engine would optimize hypothetical demand at substantial implementation
+and compatibility cost. This item does not block P3.
+
+Reopen the browser-engine work when production evidence shows at least one of:
+
+- organic sessions are rejected by the two-job capacity limit;
+- concurrent live sessions are routinely at capacity;
+- control-to-painted-frame p95 exceeds 500 ms under real traffic;
+- live-frame streaming consumes an uncomfortable share of origin upload bandwidth;
+- hosting cost or reliability makes client-side compute materially valuable; or
+- the WebGL/WASM learning work becomes an explicit project goal again.
+
+When reopened:
 
 - Start with a small numerical kernel and fixture comparison. Document how memory,
   typed arrays, JavaScript/WASM boundaries, and rendering fit together before
@@ -484,10 +517,38 @@ Done when:
   them.
 - Add an abuse contact and a graceful maintenance/busy page.
 
-### [ ] P3.3 Validate features with actual artists
+### [ ] P3.3 Add a privacy-conscious daily operations digest
+
+- Use Cloudflare's aggregated hostname analytics for estimated visits, requests, and
+  transfer rather than storing visitor IP addresses or inventing user identities.
+- Persist restart-safe daily application aggregates in `/var/lib/turing`: admitted
+  and rejected live sessions, total live duration/frame bytes, peak compute use,
+  render requests and outcomes, render duration, and numerical/internal failures.
+- Do not retain raw IPs, user agents, recipes, seeds, or per-visitor histories for
+  reporting. Document the aggregate telemetry in the privacy statement.
+- Run reporting as a separate scheduled job, never in the web request path. Give its
+  Cloudflare token analytics-read access only and keep mail credentials out of the
+  image and repository.
+- Send one plain-text report for the preceding complete day through an SMTP relay or
+  transactional mail API. Persist the reported date and delivery result so retries
+  cannot send more than one successful digest per day.
+- Include visits/page views, accepted/rejected sessions, live minutes, peak capacity,
+  approximate streaming bytes, render requested/completed/failed/cancelled counts,
+  render timing, errors, and backend restarts. Keep outage alerting separate.
+
+Done when:
+
+- A restart during the day does not lose or double-count application totals.
+- A retry or overlapping scheduler invocation cannot send a duplicate daily email.
+- No personal data is introduced, and secrets are least-privilege and recoverable.
+- The digest provides enough evidence to decide whether P2.4 should be reopened.
+
+### [ ] P3.4 Validate features with actual artists
 
 - Watch a few people create a pattern without coaching. Record where parameter names,
   gradient direction, waiting, and download quality confuse them.
+- Include at least one lower-end or mid-range physical phone in longer-session
+  testing; record browser lifecycle, thermal behavior, battery use, and responsiveness.
 - Ask tattoo artists what formats, DPI guidance, threshold controls, line cleanup,
   repeatability, and stencil workflows are actually useful before building SVG or
   elaborate editing features.
@@ -504,9 +565,11 @@ Keep early pull requests small enough to measure and reverse:
 3. **Reproducibility:** seeded engine/config split, numerical fixtures, metadata, and
    a locked/reproducible container build.
 4. **Product split:** polished Live Lab plus a one-worker render-job API and UI.
-5. **Server relief:** ship browser-side live simulation after visual/performance
-   comparison; retain the backend fallback until compatibility data says otherwise.
-6. **Creative polish:** presets, sharing, blackwork/export controls, accessibility,
+5. **Operational evidence:** add the privacy-conscious daily digest and observe real
+   traffic before changing the simulation architecture.
+6. **Conditional server relief:** reopen browser-side simulation only when measured
+   demand or the explicit learning goal justifies it; retain the backend fallback.
+7. **Creative polish:** presets, sharing, blackwork/export controls, accessibility,
    documentation, and artist feedback.
 
 ## Definition of “glory”

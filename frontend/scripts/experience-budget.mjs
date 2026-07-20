@@ -1,3 +1,4 @@
+import { writeFile } from 'node:fs/promises'
 import { performance } from 'node:perf_hooks'
 import process from 'node:process'
 import { chromium } from 'playwright'
@@ -34,6 +35,7 @@ function parseArguments(argv) {
     headed: false,
     render: true,
     enforce: false,
+    outputFile: null,
   }
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index]
@@ -44,6 +46,7 @@ function parseArguments(argv) {
     else if (argument === '--activity-interval') options.activityIntervalSeconds = Number(value), index += 1
     else if (argument === '--control-trials') options.controlTrials = Number(value), index += 1
     else if (argument === '--cpu-throttle') options.cpuThrottle = Number(value), index += 1
+    else if (argument === '--output') options.outputFile = value, index += 1
     else if (argument === '--headed') options.headed = true
     else if (argument === '--skip-render') options.render = false
     else if (argument === '--enforce') options.enforce = true
@@ -56,6 +59,7 @@ function parseArguments(argv) {
   --activity-interval SEC   Control activity interval, below server idle timeout (default 300)
   --control-trials COUNT    Initial control-to-paint trials (default 5)
   --cpu-throttle RATE       Chromium CPU throttling factor (default 1)
+  --output PATH             Write a running checkpoint and final JSON report
   --skip-render             Do not exercise queued-render progress
   --headed                  Show Chromium
   --enforce                 Exit non-zero when an initial target is missed`)
@@ -78,6 +82,9 @@ function parseArguments(argv) {
     throw new Error('--cpu-throttle must be between 1 and 20')
   }
   options.url = options.url.replace(/\/$/, '')
+  if (options.outputFile !== null && (typeof options.outputFile !== 'string' || !options.outputFile.trim())) {
+    throw new Error('--output must not be empty')
+  }
   return options
 }
 
@@ -89,6 +96,11 @@ function percentile(values, fraction) {
 
 function round(value, digits = 2) {
   return Number(value.toFixed(digits))
+}
+
+async function writeJson(outputFile, value) {
+  if (outputFile === null) return
+  await writeFile(outputFile, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
 }
 
 async function timedFetch(url) {
@@ -121,12 +133,17 @@ async function measureControlPaint(page, slider, value) {
   const previousRevision = Number(await canvas.getAttribute('data-controls-revision') ?? 0)
   const started = performance.now()
   await slider.fill(value)
-  await page.waitForFunction(
-    ({ selector, revision }) => Number(document.querySelector(selector)?.dataset.controlsRevision ?? 0) > revision,
-    { selector: 'canvas[aria-label="Live grayscale Turing pattern preview"]', revision: previousRevision },
-    { timeout: TARGETS.control_paint_p95_ms * 4 },
-  )
-  return performance.now() - started
+  try {
+    await page.waitForFunction(
+      ({ selector, revision }) => Number(document.querySelector(selector)?.dataset.controlsRevision ?? 0) > revision,
+      { selector: 'canvas[aria-label="Live grayscale Turing pattern preview"]', revision: previousRevision },
+      { timeout: TARGETS.control_paint_p95_ms * 4 },
+    )
+    return { acknowledged: true, elapsedMs: performance.now() - started }
+  } catch (error) {
+    if (error?.name !== 'TimeoutError') throw error
+    return { acknowledged: false, elapsedMs: performance.now() - started }
+  }
 }
 
 async function measureRenderProgress(page, baseUrl) {
@@ -206,6 +223,16 @@ async function measureRenderProgress(page, baseUrl) {
 
 async function main() {
   const options = parseArguments(process.argv.slice(2))
+  const runStartedAt = new Date().toISOString()
+  if (options.outputFile !== null) {
+    console.error(`[budget] Writing checkpoints and the final report to ${options.outputFile}`)
+    await writeJson(options.outputFile, {
+      status: 'starting',
+      url: options.url,
+      started_at: runStartedAt,
+      requested_duration_seconds: options.durationSeconds,
+    })
+  }
   await timedFetch(`${options.url}/`)
   const browser = await chromium.launch({ headless: !options.headed })
   try {
@@ -227,9 +254,9 @@ async function main() {
 
     await page.getByText('Advanced chemistry', { exact: true }).click()
     const feedSlider = page.getByRole('slider', { name: /Feed.*left/ })
-    const controlLatencies = []
+    const controlMeasurements = []
     for (let trial = 0; trial < options.controlTrials; trial += 1) {
-      controlLatencies.push(await measureControlPaint(page, feedSlider, trial % 2 === 0 ? '0.051' : '0.052'))
+      controlMeasurements.push(await measureControlPaint(page, feedSlider, trial % 2 === 0 ? '0.051' : '0.052'))
     }
 
     const render = options.render ? await measureRenderProgress(page, options.url) : null
@@ -241,11 +268,13 @@ async function main() {
     let frameRegressions = 0
     const sessionStarted = performance.now()
     let nextActivityAt = options.activityIntervalSeconds * 1_000
+    let nextActivityValue = options.controlTrials % 2 === 0 ? '0.051' : '0.052'
+    let nextCheckpointAt = 60_000
     while (performance.now() - sessionStarted < options.durationSeconds * 1_000) {
       const elapsed = performance.now() - sessionStarted
       if (elapsed >= nextActivityAt) {
-        const value = (Math.floor(elapsed / (options.activityIntervalSeconds * 1_000)) % 2 === 0) ? '0.051' : '0.052'
-        controlLatencies.push(await measureControlPaint(page, feedSlider, value))
+        controlMeasurements.push(await measureControlPaint(page, feedSlider, nextActivityValue))
+        nextActivityValue = nextActivityValue === '0.051' ? '0.052' : '0.051'
         nextActivityAt += options.activityIntervalSeconds * 1_000
       }
       const metrics = metricMap(await cdp.send('Performance.getMetrics'))
@@ -260,17 +289,38 @@ async function main() {
         js_heap_used_bytes: Math.round(metrics.JSHeapUsedSize ?? 0),
         nodes: Math.round(metrics.Nodes ?? 0),
       })
+      if (options.outputFile !== null && (samples.length === 1 || elapsed >= nextCheckpointAt)) {
+        await writeJson(options.outputFile, {
+          status: 'running',
+          url: options.url,
+          started_at: runStartedAt,
+          requested_duration_seconds: options.durationSeconds,
+          elapsed_seconds: round(elapsed / 1_000),
+          sample_count: samples.length,
+          latest_sample: samples.at(-1),
+          control_paint_timeout_count: controlMeasurements.filter(
+            (measurement) => !measurement.acknowledged,
+          ).length,
+        })
+        console.error(`[budget] ${Math.floor(elapsed / 1_000)} / ${options.durationSeconds} seconds`)
+        while (nextCheckpointAt <= elapsed) nextCheckpointAt += 60_000
+      }
       const remaining = options.durationSeconds * 1_000 - (performance.now() - sessionStarted)
       if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, Math.min(options.sampleIntervalSeconds * 1_000, remaining)))
     }
     await cdp.send('HeapProfiler.collectGarbage')
     const memoryEnd = metricMap(await cdp.send('Performance.getMetrics'))
+    const acknowledgedControlLatencies = controlMeasurements
+      .filter((measurement) => measurement.acknowledged)
+      .map((measurement) => measurement.elapsedMs)
+    const controlPaintTimeouts = controlMeasurements.length - acknowledgedControlLatencies.length
 
     const measurements = {
       first_session_preview_ms: round(coldPreview.elapsedMs),
       warm_session_preview_ms: round(warmPreview.elapsedMs),
-      control_paint_samples_ms: controlLatencies.map((value) => round(value)),
-      control_paint_p95_ms: round(percentile(controlLatencies, 0.95)),
+      control_paint_samples_ms: acknowledgedControlLatencies.map((value) => round(value)),
+      control_paint_timeout_count: controlPaintTimeouts,
+      control_paint_p95_ms: round(percentile(acknowledgedControlLatencies, 0.95)),
       session_duration_seconds: options.durationSeconds,
       sample_count: samples.length,
       max_pending_frames: Math.max(...samples.map((sample) => sample.pending_frames), 0),
@@ -284,7 +334,8 @@ async function main() {
     }
     const checks = {
       first_preview: measurements.warm_session_preview_ms <= TARGETS.first_preview_ms,
-      control_paint: measurements.control_paint_p95_ms <= TARGETS.control_paint_p95_ms,
+      control_paint: measurements.control_paint_timeout_count === 0
+        && measurements.control_paint_p95_ms <= TARGETS.control_paint_p95_ms,
       bounded_frame_queue: measurements.max_pending_frames <= TARGETS.max_pending_frames,
       monotonic_paint: measurements.frame_id_regressions === 0,
       stable_heap: measurements.heap_growth_bytes <= TARGETS.heap_growth_bytes,
@@ -295,6 +346,7 @@ async function main() {
       static_ui_under_render: render === null || render.static_ui_p95_ms <= TARGETS.static_ui_p95_ms,
     }
     const report = {
+      status: 'completed',
       label: 'chromium-server-fallback',
       url: options.url,
       timestamp: new Date().toISOString(),
@@ -305,6 +357,7 @@ async function main() {
       checks,
       all_targets_met: Object.values(checks).every(Boolean),
     }
+    await writeJson(options.outputFile, report)
     console.log(JSON.stringify(report, null, 2))
     await context.close()
     if (options.enforce && !report.all_targets_met) process.exitCode = 1

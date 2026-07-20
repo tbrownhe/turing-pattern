@@ -4,3 +4,4 @@
 *.pyc
 .env
 .pytest_cache/
+/soak-results.json
