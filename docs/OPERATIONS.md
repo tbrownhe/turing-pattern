@@ -49,6 +49,30 @@ Before changing the stack, record the current commit and image tag. After deploy
 run the public smoke test and keep the prior tag available until the new version has
 survived a real live session and queued render.
 
+## Search discovery
+
+The canonical URL, social metadata, `robots.txt`, and sitemap intentionally name the
+production host `turing.tobiasbrownheft.xyz`. A fork deployed to another hostname must
+replace that host in `frontend/index.html`, `frontend/public/robots.txt`, and
+`frontend/public/sitemap.xml` before publishing.
+
+After deployment, verify the discovery files and ensure a nonexistent URL is a real
+`404` rather than an indexable copy of the application shell:
+
+```console
+curl -fsS https://$DOMAIN/robots.txt
+curl -fsS https://$DOMAIN/sitemap.xml
+curl -fsSI https://$DOMAIN/social-card.png
+curl -sS -o /dev/null -w '%{http_code}\n' https://$DOMAIN/not-a-real-page
+```
+
+Create a Google Search Console domain property for `tobiasbrownheft.xyz`, complete
+its DNS verification, submit `https://turing.tobiasbrownheft.xyz/sitemap.xml`, and
+use URL Inspection to request indexing for the canonical home page. Then add the
+site to Bing Webmaster Tools (it can import the verified Search Console property)
+and submit the same sitemap. These are one-time discovery steps, not recurring deploy
+requirements. Never commit DNS verification tokens or account credentials.
+
 ## Diagnose
 
 Public checks go through Nginx:

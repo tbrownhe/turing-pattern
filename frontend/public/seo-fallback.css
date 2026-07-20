@@ -1,0 +1,42 @@
+:root {
+  color: #f4f0e7;
+  background: #0a0d0c;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+  background: #0a0d0c;
+}
+
+.seo-fallback {
+  width: min(56rem, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: clamp(3rem, 10vw, 8rem) 0;
+}
+
+.seo-fallback > p:first-child {
+  color: #b7ef62;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.seo-fallback h1 {
+  max-width: 12ch;
+  margin: 0;
+  font: 500 clamp(3rem, 10vw, 6rem) / 0.95 Georgia, serif;
+  letter-spacing: -0.055em;
+}
+
+.seo-fallback > p:not(:first-child) {
+  max-width: 40rem;
+  color: #aeb8b3;
+  font-size: 1.1rem;
+  line-height: 1.6;
+}
+
+.seo-fallback a {
+  color: #b7ef62;
+}

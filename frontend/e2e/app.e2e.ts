@@ -4,7 +4,7 @@ test('a visitor receives a live frame and can tune a control', async ({ page }) 
   await page.goto('/')
 
   await expect(
-    page.getByRole('heading', { name: 'Gray-Scott Pattern Lab' }),
+    page.getByRole('heading', { name: 'Turing Pattern Generator' }),
   ).toBeVisible()
   await expect(page.getByText('Live simulation running')).toBeVisible({
     timeout: 15_000,
@@ -62,6 +62,41 @@ test('a visitor receives a live frame and can tune a control', async ({ page }) 
   await expect(page.getByRole('link', { name: 'Download completed PNG' })).toBeVisible({
     timeout: 15_000,
   })
+})
+
+test('publishes crawler, sharing, and explanatory content', async ({ page, request }) => {
+  await page.goto('/')
+
+  await expect(page).toHaveTitle('Turing Pattern Generator | Gray-Scott Pattern Lab')
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
+    'href',
+    'https://turing.tobiasbrownheft.xyz/',
+  )
+  await expect(page.locator('meta[property="og:image"]')).toHaveAttribute(
+    'content',
+    'https://turing.tobiasbrownheft.xyz/social-card.png',
+  )
+  await expect(
+    page.getByRole('heading', { name: 'Why spots, stripes, and mazes keep appearing' }),
+  ).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Giant pufferfish patterns' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Leopard and cat spots' })).toBeVisible()
+
+  const robots = await request.get('/robots.txt')
+  expect(robots.ok()).toBe(true)
+  expect(await robots.text()).toContain(
+    'Sitemap: https://turing.tobiasbrownheft.xyz/sitemap.xml',
+  )
+
+  const sitemap = await request.get('/sitemap.xml')
+  expect(sitemap.ok()).toBe(true)
+  expect(await sitemap.text()).toContain(
+    '<loc>https://turing.tobiasbrownheft.xyz/</loc>',
+  )
+
+  const socialCard = await request.get('/social-card.png')
+  expect(socialCard.ok()).toBe(true)
+  expect(socialCard.headers()['content-type']).toContain('image/png')
 })
 
 test('the preview remains fully visible while phone controls scroll', async ({ page }) => {

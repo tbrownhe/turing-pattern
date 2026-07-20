@@ -729,10 +729,11 @@ function App() {
   return (
     <main className="app-shell">
       <header className="hero">
-        <p className="eyebrow">Reaction + diffusion</p>
-        <h1>Gray-Scott Pattern Lab</h1>
+        <p className="eyebrow">Gray-Scott reaction-diffusion</p>
+        <h1>Turing Pattern Generator</h1>
         <p className="intro">
-          Start with a pattern family, find a beautiful accident, and keep its exact recipe.
+          Explore a live pattern family, find a beautiful accident, and preserve its
+          exact recipe for a fresh high-resolution tattoo or print design.
         </p>
       </header>
 
@@ -749,7 +750,7 @@ function App() {
         )}
       </section>
 
-      <section className="lab" aria-label="Pattern recipe and live preview">
+      <section id="live-lab" className="lab" aria-label="Pattern recipe and live preview">
         <aside className="control-panel basic-panel">
           <div className="panel-heading">
             <span>Recipe</span>
@@ -1018,6 +1019,94 @@ function App() {
         onImportLiveSettings={handOffToRenderer}
         onImportRecipeFile={() => importRef.current?.click()}
       />
+
+      <section className="pattern-context" aria-labelledby="pattern-context-title">
+        <div className="context-intro">
+          <p className="eyebrow">Pattern formation in nature and technology</p>
+          <h2 id="pattern-context-title">Why spots, stripes, and mazes keep appearing</h2>
+          <p>
+            Alan Turing showed how locally interacting, diffusing substances can turn
+            uniform fields into organized patterns. This lab uses the Gray-Scott model
+            to explore that idea—not to reproduce any one organism exactly.
+          </p>
+        </div>
+
+        <figure className="pattern-example">
+          <img
+            src="/pattern-example.png"
+            width="1024"
+            height="256"
+            loading="lazy"
+            alt="Black-and-white Gray-Scott field shifting from fine spots through maze-like stripes to dense spots"
+          />
+          <figcaption>
+            One simulated field can move between dots, branching stripes, and maze-like
+            forms as its feed, kill, and diffusion values vary across space.
+          </figcaption>
+        </figure>
+
+        <div className="pattern-example-grid">
+          <article>
+            <p className="example-kind">Biology · fish skin</p>
+            <h3>Giant pufferfish patterns</h3>
+            <p>
+              Pufferfish relatives display spots, reticulations, and maze-like skin
+              markings. Fish-skin studies show that pigment-cell interactions can create
+              the short-range activation and long-range inhibition associated with
+              Turing patterns, although those cells are not the Gray-Scott chemicals.
+            </p>
+            <a
+              href="https://pmc.ncbi.nlm.nih.gov/articles/PMC8580470/"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Explore the fish-skin research
+            </a>
+          </article>
+
+          <article>
+            <p className="example-kind">Biology · coat markings</p>
+            <h3>Leopard and cat spots</h3>
+            <p>
+              Cat-family markings helped inspire reaction-diffusion models. Research in
+              developing cat skin found a Dkk4 molecular pre-pattern and proposed
+              short-range Wnt activators working with longer-range inhibitors. Real coat
+              development is richer than this simulation, but the organizing logic is related.
+            </p>
+            <a
+              href="https://www.nature.com/articles/s41467-021-25348-2"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Read the cat-pattern study
+            </a>
+          </article>
+
+          <article>
+            <p className="example-kind">Engineering analogue</p>
+            <h3>Block-copolymer nanolithography</h3>
+            <p>
+              Chemically distinct polymer blocks can phase-separate into nanoscale
+              domains. Templates guide that self-assembly into sub-10-nanometer features
+              studied for semiconductor and data-storage patterning. The kinship here is
+              self-organization, not an identical reaction-diffusion mechanism.
+            </p>
+            <a
+              href="https://www.nist.gov/programs-projects/directed-self-assembly-block-copolymers-nanopatterning"
+              target="_blank"
+              rel="noreferrer"
+            >
+              See NIST's patterning overview
+            </a>
+          </article>
+        </div>
+
+        <p className="context-note">
+          This project began as a way to explore tattoo ideas. The generator turns that
+          visual vocabulary into reproducible recipes while leaving room for the happy
+          accidents that make generative art worth exploring.
+        </p>
+      </section>
 
       <footer className="site-footer">
         <span>Application {APPLICATION_VERSION} · Engine {CURRENT_ENGINE_VERSION}</span>

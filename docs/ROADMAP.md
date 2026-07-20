@@ -524,7 +524,9 @@ uses documented immutable release/SHA tags. The operations runbook covers stagin
 and post-deploy smoke tests, rollback, dependency and quarterly drills, backup and
 incident handling. Privacy/retention is published, the live UI handles busy/backend
 maintenance states without losing recipe controls, and the repository publishes
-public issue and private security-reporting paths.
+public issue and private security-reporting paths. The public launch also includes a
+canonical URL, crawler policy, image sitemap, social preview metadata, meaningful
+pre-render content, scientific context, and a search-engine submission checklist.
 
 - Use semantic application/engine versions and immutable container tags.
 - Add a staging smoke test, production post-deploy health check, and rollback command.

@@ -3,6 +3,8 @@
 An interactive reaction-diffusion playground for discovering organic textures and
 exporting reproducible patterns.
 
+[Try the live Turing Pattern Generator](https://turing.tobiasbrownheft.xyz/)
+
 This began as a local Python script for exploring tattoo ideas. One generated
 pattern made the jump from pixels to skin and is tattooed on the author's arm. That
 origin still guides the product: experimentation should feel immediate, beautiful

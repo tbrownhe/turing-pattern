@@ -102,6 +102,114 @@ h1 {
   color: inherit;
 }
 
+.pattern-context {
+  margin-top: 2rem;
+  padding: clamp(1.25rem, 3vw, 2.25rem);
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: rgba(18, 23, 21, 0.84);
+}
+
+.context-intro {
+  max-width: 780px;
+}
+
+.context-intro h2 {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(2rem, 5vw, 3.6rem);
+  font-weight: 500;
+  letter-spacing: -0.045em;
+  line-height: 1;
+}
+
+.context-intro > p:last-child {
+  max-width: 690px;
+  margin: 1rem 0 0;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+.pattern-example {
+  margin: 1.75rem 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 0.8rem;
+  background: #050706;
+}
+
+.pattern-example img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 4 / 1;
+  object-fit: cover;
+}
+
+.pattern-example figcaption {
+  padding: 0.8rem 1rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.pattern-example-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.pattern-example-grid article {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  padding: 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.8rem;
+  background: var(--panel);
+}
+
+.pattern-example-grid h3 {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.35rem;
+  font-weight: 500;
+}
+
+.pattern-example-grid article > p:not(.example-kind) {
+  margin: 0.75rem 0 1rem;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.example-kind {
+  margin: 0 0 0.55rem;
+  color: var(--acid);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.pattern-example-grid a {
+  margin-top: auto;
+  color: var(--acid);
+  font-size: 0.84rem;
+  font-weight: 700;
+  text-underline-offset: 0.18em;
+}
+
+.context-note {
+  margin: 1.25rem 0 0;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
 .lab {
   display: grid;
   grid-template-columns: minmax(260px, 0.72fr) minmax(360px, 1.45fr);
@@ -833,6 +941,10 @@ input[type="range"] {
   }
 
   .render-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .pattern-example-grid {
     grid-template-columns: 1fr;
   }
 
