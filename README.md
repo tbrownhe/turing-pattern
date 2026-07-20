@@ -21,7 +21,8 @@ The order-disorder transition that inspired one of the included recipes:
   diffusion gradients.
 - Curated pattern families plus named, versioned recipes containing the exact seed,
   controls, and engine version.
-- URL and local restoration, copy-link sharing, and strict JSON recipe import/export.
+- URL and local restoration, copy-link sharing, strict JSON import/export, and
+  recipe restoration from downloaded PNG metadata.
 - Pause, one-iteration step, deterministic restart, random seed, state-only
   perturbation, reconnect, and leak-free canvas rendering.
 - Bounded recipe undo/redo and one-frame before/after comparison.
@@ -166,11 +167,16 @@ concentration arrays:
 }
 ```
 
-Shared URL recipes take precedence over the last recipe in local storage. Imported
-JSON is rejected if it has unknown fields, an unsupported version, unsafe values,
-or an invalid seed. Changing a raw control evolves the current state; applying a
-preset or seed restarts deterministically. Perturbation intentionally changes only
-the current state and therefore does not alter the saved recipe.
+Shared URL recipes take precedence over the last recipe in local storage. **Import
+JSON/PNG** accepts either an exported recipe file or a PNG produced by the renderer
+and restores its embedded `TuringParams` recipe. A high-resolution PNG also restores
+its physical dimensions, detail, feature scale, framing, and termination step in
+Render Studio. Existing exports containing the earlier compact controls-and-seed
+envelope remain supported. Imported metadata is rejected if it has unknown fields,
+an unsupported version, unsafe values, or an invalid seed. Changing a raw control
+evolves the current state; applying a preset or seed restarts deterministically.
+Perturbation intentionally changes only the current state and therefore does not
+alter the saved recipe.
 
 ## High-resolution planning and time studies
 
@@ -279,7 +285,11 @@ curl -X POST http://127.0.0.1:8000/api/v1/generate \
   --output pattern.png
 ```
 
-PNG exports contain the recipe in the `TuringParams` text field.
+PNG exports contain the recipe in the `TuringParams` text field. Load one through
+**Import JSON/PNG** in the Live Lab or **Load saved JSON/PNG** at the top of Render
+Studio. High-resolution imports repopulate the render planner as well as the Live Lab
+recipe. Current exports retain the recipe name and preset as well as its engine
+version, controls, and seed.
 
 ## Capacity and security model
 

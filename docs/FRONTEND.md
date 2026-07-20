@@ -36,6 +36,8 @@ frontend, audit, build, and browser gate.
   preview/control layout.
 - `src/protocol.ts` defines the browser-side control vocabulary and hard bounds.
 - `src/recipe.ts` defines versioned recipes and curated presets.
+- `src/pngRecipe.ts` performs bounded client-side extraction of embedded PNG recipes;
+  imported images are never uploaded.
 - `src/RenderStudio.tsx` owns physical-size planning, time studies, queue polling,
   cancellation, recovery, and artifact download.
 - `e2e/app.e2e.ts` verifies a real live frame/control update and the phone viewport
@@ -48,8 +50,9 @@ frontend, audit, build, and browser gate.
 - Keep at most one decoded frame pending and never paint a frame ID regression.
 - Pair every binary PNG with its preceding frame metadata before painting it.
 - Revoke replaced object URLs and stop/reconnect cleanly after backgrounding.
-- Recipe changes are undoable and serializable; display zoom/contrast are not recipe
-  parameters.
+- Recipe changes are undoable and serializable; JSON and PNG metadata imports pass
+  through the same strict validator. High-resolution PNGs also restore validated
+  planner inputs, while display zoom/contrast are not recipe parameters.
 - Importing Live Lab settings into Render Studio starts a new simulation. It never
   claims to reproduce the current transient frame.
 - Production remains same-origin through Nginx. Do not add cross-origin API URLs

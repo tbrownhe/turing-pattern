@@ -111,6 +111,10 @@ class RenderPlanRequest(StrictModel):
     feature_scale: FeatureScale
     development_steps: DevelopmentStep
     framing: Literal["crop", "fit", "extend"] = "crop"
+    recipe_name: Annotated[str, Field(min_length=1, max_length=80)] = "Imported render"
+    recipe_preset: Literal[
+        "mixed", "spots", "worms", "coral", "maze", "order-disorder", "custom"
+    ] = "custom"
 
     @field_validator("feature_scale")
     @classmethod

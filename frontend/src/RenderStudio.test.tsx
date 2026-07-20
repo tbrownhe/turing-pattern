@@ -14,8 +14,40 @@ afterEach(() => {
 })
 
 describe('high-resolution render planning', () => {
+  it('restores validated render settings imported from a PNG', () => {
+    render(
+      <RenderStudio
+        recipe={recipe}
+        liveSteps={3200}
+        handoffVersion={1}
+        importedSettings={{
+          width: 12,
+          height: 18,
+          unit: 'cm',
+          quality: 'fine',
+          featureScale: 0.5,
+          developmentSteps: 3200,
+          framing: 'fit',
+        }}
+        onImportLiveSettings={vi.fn()}
+        onImportRecipeFile={vi.fn()}
+      />,
+    )
+
+    expect((screen.getByLabelText('Width') as HTMLInputElement).value).toBe('12')
+    expect((screen.getByLabelText('Height') as HTMLInputElement).value).toBe('18')
+    expect((screen.getByLabelText('Units') as HTMLSelectElement).value).toBe('cm')
+    expect((screen.getByLabelText('Evolution steps') as HTMLInputElement).value)
+      .toBe('3200')
+    expect(screen.getByRole('radio', { name: /Fine.*600/ })).toHaveProperty('checked', true)
+    expect(screen.getByRole('radio', { name: /Fine.*0.5/ })).toHaveProperty('checked', true)
+    expect((screen.getByDisplayValue('Fit without stretching') as HTMLSelectElement).value)
+      .toBe('fit')
+  })
+
   it('resolves physical inputs through the server planner', async () => {
     const importSettings = vi.fn()
+    const importRecipeFile = vi.fn()
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -40,16 +72,20 @@ describe('high-resolution render planning', () => {
       }),
     })
     vi.stubGlobal('fetch', fetchMock)
-    render(<RenderStudio recipe={recipe} liveSteps={5000} handoffVersion={1} onImportLiveSettings={importSettings} />)
+    render(<RenderStudio recipe={recipe} liveSteps={5000} handoffVersion={1} onImportLiveSettings={importSettings} onImportRecipeFile={importRecipeFile} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Import current Live Lab settings' }))
     expect(importSettings).toHaveBeenCalledOnce()
+    fireEvent.click(screen.getByRole('button', { name: 'Load saved JSON/PNG' }))
+    expect(importRecipeFile).toHaveBeenCalledOnce()
 
     fireEvent.click(screen.getByRole('button', { name: 'Review render plan' }))
 
     expect(await screen.findByText('1,800 × 1,800 px')).toBeTruthy()
     const request = JSON.parse(fetchMock.mock.calls[0][1].body)
     expect(request).toEqual(expect.objectContaining({
+      recipe_name: 'Slow maze',
+      recipe_preset: 'maze',
       width: 6,
       height: 6,
       unit: 'in',
@@ -76,7 +112,7 @@ describe('high-resolution render planning', () => {
         ],
       }),
     }))
-    render(<RenderStudio recipe={recipe} liveSteps={5000} handoffVersion={1} onImportLiveSettings={vi.fn()} />)
+    render(<RenderStudio recipe={recipe} liveSteps={5000} handoffVersion={1} onImportLiveSettings={vi.fn()} onImportRecipeFile={vi.fn()} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Preview development stages' }))
     const checkpoint = await screen.findByRole('button', { name: /2,500 steps/ })
@@ -128,7 +164,7 @@ describe('high-resolution render planning', () => {
         }),
       })
     vi.stubGlobal('fetch', fetchMock)
-    render(<RenderStudio recipe={recipe} liveSteps={5000} handoffVersion={1} onImportLiveSettings={vi.fn()} />)
+    render(<RenderStudio recipe={recipe} liveSteps={5000} handoffVersion={1} onImportLiveSettings={vi.fn()} onImportRecipeFile={vi.fn()} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Review render plan' }))
     await screen.findByText('900 × 900 px')

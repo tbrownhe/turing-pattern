@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import type { ImportedRenderSettings } from './pngRecipe'
 import type { PatternRecipe } from './recipe'
 
 type PhysicalUnit = 'in' | 'cm'
@@ -67,7 +68,9 @@ interface RenderStudioProps {
   recipe: PatternRecipe
   liveSteps: number
   handoffVersion: number
+  importedSettings?: ImportedRenderSettings | null
   onImportLiveSettings: () => void
+  onImportRecipeFile: () => void
 }
 
 const qualityOptions: ReadonlyArray<{
@@ -114,7 +117,9 @@ export default function RenderStudio({
   recipe,
   liveSteps,
   handoffVersion,
+  importedSettings,
   onImportLiveSettings,
+  onImportRecipeFile,
 }: RenderStudioProps) {
   const [width, setWidth] = useState('6')
   const [height, setHeight] = useState('6')
@@ -168,16 +173,28 @@ export default function RenderStudio({
 
   useEffect(() => {
     if (handoffVersion === 0) return
-    setDevelopmentSteps(String(Math.max(100, Math.min(20_000, liveSteps || 5000))))
+    if (importedSettings) {
+      setWidth(String(importedSettings.width))
+      setHeight(String(importedSettings.height))
+      setUnit(importedSettings.unit)
+      setQuality(importedSettings.quality)
+      setFeatureScale(importedSettings.featureScale)
+      setDevelopmentSteps(String(importedSettings.developmentSteps))
+      setFraming(importedSettings.framing)
+    } else {
+      setDevelopmentSteps(String(Math.max(100, Math.min(20_000, liveSteps || 5000))))
+    }
     setPlan(null)
     setStudy(null)
     setPlanError('')
     setStudyError('')
-  }, [handoffVersion, liveSteps])
+  }, [handoffVersion, importedSettings, liveSteps])
 
   const requestBody = () => ({
     controls: recipe.controls,
     seed: recipe.seed,
+    recipe_name: recipe.name,
+    recipe_preset: recipe.preset,
     width: Number(width),
     height: Number(height),
     unit,
@@ -281,9 +298,14 @@ export default function RenderStudio({
         <div className="render-source">
           <strong>{recipe.name}</strong>
           <span>Seed {recipe.seed} · live reference {liveSteps.toLocaleString()} steps</span>
-          <button className="button button-primary button-small" type="button" onClick={onImportLiveSettings}>
-            Import current Live Lab settings
-          </button>
+          <div className="render-source-actions">
+            <button className="button button-primary button-small" type="button" onClick={onImportLiveSettings}>
+              Import current Live Lab settings
+            </button>
+            <button className="button button-small" type="button" onClick={onImportRecipeFile}>
+              Load saved JSON/PNG
+            </button>
+          </div>
         </div>
       </div>
       <p className="render-intro">

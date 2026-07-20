@@ -453,6 +453,17 @@ input[type="range"]:focus-visible,
   margin-top: 0.45rem;
 }
 
+.render-source-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.render-source-actions .button {
+  flex: 1 1 10rem;
+}
+
 .render-intro {
   max-width: 760px;
   margin: 0.75rem 0 1.25rem;
@@ -846,6 +857,10 @@ input[type="range"] {
   .render-source {
     width: 100%;
     text-align: left;
+  }
+
+  .render-source-actions {
+    justify-content: flex-start;
   }
 
   .dimension-grid {

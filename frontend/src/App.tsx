@@ -9,6 +9,11 @@ import {
 import './App.css'
 import RenderStudio from './RenderStudio'
 import {
+  MAX_PNG_RECIPE_BYTES,
+  importPngRecipe,
+  type ImportedRenderSettings,
+} from './pngRecipe'
+import {
   controlsMessage,
   updateControl,
   type ControlKey,
@@ -168,6 +173,8 @@ function App() {
   const [renderRecipe, setRenderRecipe] = useState(() => cloneRecipe(loadedRecipe.recipe))
   const [renderReferenceSteps, setRenderReferenceSteps] = useState(0)
   const [renderHandoffVersion, setRenderHandoffVersion] = useState(0)
+  const [importedRenderSettings, setImportedRenderSettings] =
+    useState<ImportedRenderSettings | null>(null)
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const advancedRef = useRef<HTMLDetailsElement | null>(null)
@@ -447,12 +454,33 @@ function App() {
     input.value = ''
     if (!file) return
     try {
-      const imported = parseRecipeJson(await file.text())
+      const isPng = file.type === 'image/png' || file.name.toLowerCase().endsWith('.png')
+      if (isPng && file.size > MAX_PNG_RECIPE_BYTES) {
+        throw new Error('PNG is too large to import (64 MB maximum).')
+      }
+      const pngImport = isPng
+        ? importPngRecipe(await file.arrayBuffer(), file.name)
+        : null
+      const imported = pngImport?.recipe ?? parseRecipeJson(await file.text())
+      const source = pngImport?.renderSettings
+        ? 'PNG recipe and render settings'
+        : isPng
+          ? 'PNG recipe'
+          : 'Recipe'
       const versionNote =
         imported.engine_version === engineVersionRef.current
-          ? 'Recipe imported and restarted.'
-          : `Recipe imported from engine ${imported.engine_version} and loaded with ${engineVersionRef.current}.`
+          ? `${source} imported and restarted.`
+          : `${source} imported from engine ${imported.engine_version} and loaded with ${engineVersionRef.current}.`
       applyRecipe(imported, versionNote)
+      if (pngImport?.renderSettings) {
+        setRenderRecipe(cloneRecipe({
+          ...imported,
+          engine_version: engineVersionRef.current,
+        }))
+        setRenderReferenceSteps(pngImport.renderSettings.developmentSteps)
+        setImportedRenderSettings(pngImport.renderSettings)
+        setRenderHandoffVersion((value) => value + 1)
+      }
     } catch (error) {
       setRecipeNotice(
         error instanceof Error ? `Import failed: ${error.message}` : 'Recipe import failed.',
@@ -477,6 +505,7 @@ function App() {
   const handOffToRenderer = () => {
     setRenderRecipe(cloneRecipe(recipeRef.current))
     setRenderReferenceSteps(liveIteration)
+    setImportedRenderSettings(null)
     setRenderHandoffVersion((value) => value + 1)
   }
 
@@ -878,12 +907,12 @@ function App() {
           <div className="share-actions" aria-label="Recipe sharing">
             <button className="button" onClick={copyRecipeLink}>Copy link</button>
             <button className="button" onClick={exportRecipe}>Export JSON</button>
-            <button className="button" onClick={() => importRef.current?.click()}>Import JSON</button>
+            <button className="button" onClick={() => importRef.current?.click()}>Import JSON/PNG</button>
             <input
               ref={importRef}
               className="visually-hidden"
               type="file"
-              accept="application/json,.json"
+              accept="application/json,image/png,.json,.png"
               onChange={importRecipe}
               tabIndex={-1}
             />
@@ -985,7 +1014,9 @@ function App() {
         recipe={renderRecipe}
         liveSteps={renderReferenceSteps}
         handoffVersion={renderHandoffVersion}
+        importedSettings={importedRenderSettings}
         onImportLiveSettings={handOffToRenderer}
+        onImportRecipeFile={() => importRef.current?.click()}
       />
 
       <footer className="site-footer">

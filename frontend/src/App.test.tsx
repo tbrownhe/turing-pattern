@@ -354,4 +354,12 @@ describe('live controls', () => {
         .getAttribute('href'),
     ).toBe('https://github.com/tbrownhe/turing-pattern/issues/new/choose')
   })
+
+  it('offers JSON and embedded PNG recipe imports', () => {
+    const { container } = render(<App />)
+
+    expect(screen.getByRole('button', { name: 'Import JSON/PNG' })).toBeTruthy()
+    expect(container.querySelector<HTMLInputElement>('input[type="file"]')?.accept)
+      .toBe('application/json,image/png,.json,.png')
+  })
 })

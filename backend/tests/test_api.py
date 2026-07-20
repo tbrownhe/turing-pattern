@@ -238,6 +238,8 @@ def test_render_job_completes_persists_metadata_and_serves_an_artifact(client):
         "feature_scale": 1.0,
         "development_steps": 100,
         "framing": "crop",
+        "recipe_name": "Tattoo draft",
+        "recipe_preset": "custom",
     }
 
     queued = client.post("/api/v1/renders", json=payload)
@@ -258,7 +260,14 @@ def test_render_job_completes_persists_metadata_and_serves_an_artifact(client):
     image = Image.open(BytesIO(artifact.content))
     metadata = json.loads(image.text["TuringParams"])
     assert metadata["actual_steps"] == 100
-    assert metadata["recipe"]["seed"] == 19
+    assert metadata["recipe"] == {
+        "recipe_version": 1,
+        "engine_version": "2.0.0",
+        "name": "Tattoo draft",
+        "preset": "custom",
+        "controls": CONTROLS,
+        "seed": 19,
+    }
     assert metadata["plan"]["output_width"] == 15
 
     repeated = client.post("/api/v1/renders", json=payload).json()

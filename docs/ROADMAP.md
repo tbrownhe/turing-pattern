@@ -326,8 +326,9 @@ Done when:
   numerical control without storing simulation arrays.
 - Curated mixed, spots, worms, coral, and maze starting points include plain-language
   descriptions.
-- Share URLs take precedence over validated local storage. Copy-link and strict JSON
-  import/export make recipes portable.
+- Share URLs take precedence over validated local storage. Copy-link, strict JSON
+  import/export, and bounded recipe-and-render-plan restoration from rendered PNG
+  metadata make recipes portable in both directions.
 - Basic recipe and seed controls are separated from the exact endpoint chemistry in
   a collapsible Advanced panel.
 - Deterministic restart, random seed, and state-only perturbation are distinct actions.

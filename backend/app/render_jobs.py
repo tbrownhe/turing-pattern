@@ -87,6 +87,10 @@ def _render_artifact(
         "dtype": "float32",
         "actual_steps": payload.development_steps,
         "recipe": {
+            "recipe_version": 1,
+            "engine_version": ENGINE_VERSION,
+            "name": payload.recipe_name,
+            "preset": payload.recipe_preset,
             "controls": payload.controls.model_dump(),
             "seed": payload.seed,
         },
