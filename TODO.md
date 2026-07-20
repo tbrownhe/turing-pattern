@@ -519,6 +519,13 @@ Done when:
 
 ### [ ] P3.3 Add a privacy-conscious daily operations digest
 
+Implementation completed on the `overhaul` branch. `usage.sqlite3` now persists
+daily application aggregates beside render metadata; the separate Compose
+`reporter` profile combines them with Cloudflare hostname aggregates and sends a
+plain-text SMTP digest. Delivery is strict at-most-once, with the claim committed
+before SMTP. Configuration, dry-run, secret permissions, privacy scope, and the
+systemd timer are documented in `REPORTING.md` and `PRIVACY.md`.
+
 - Use Cloudflare's aggregated hostname analytics for estimated visits, requests, and
   transfer rather than storing visitor IP addresses or inventing user identities.
 - Persist restart-safe daily application aggregates in `/var/lib/turing`: admitted
@@ -542,6 +549,16 @@ Done when:
 - A retry or overlapping scheduler invocation cannot send a duplicate daily email.
 - No personal data is introduced, and secrets are least-privilege and recoverable.
 - The digest provides enough evidence to decide whether P2.4 should be reopened.
+
+Production close-out:
+
+- [ ] Create the least-privilege Cloudflare analytics token and SMTP app password on
+  `silicide`, then run the documented test email and dry run and verify both data
+  sources.
+- [ ] Send one real digest, immediately invoke the job again, and verify the second
+  invocation reports that the date is already claimed without sending another mail.
+- [ ] Install/enable `turing-report.timer` and confirm its first scheduled run in the
+  systemd journal.
 
 ### [ ] P3.4 Validate features with actual artists
 

@@ -1,0 +1,11 @@
+[Unit]
+Description=Send the Turing Pattern daily usage report
+
+[Timer]
+OnCalendar=*-*-* 08:15:00
+RandomizedDelaySec=10m
+Persistent=true
+Unit=turing-report.service
+
+[Install]
+WantedBy=timers.target

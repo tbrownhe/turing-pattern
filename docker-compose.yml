@@ -28,6 +28,7 @@ services:
       TURING_MAX_RENDER_ARTIFACTS: ${TURING_MAX_RENDER_ARTIFACTS:-8}
       TURING_MAX_RENDER_JOB_HISTORY: ${TURING_MAX_RENDER_JOB_HISTORY:-64}
       TURING_RENDER_CHUNK_STEPS: ${TURING_RENDER_CHUNK_STEPS:-100}
+      TURING_REPORT_TIMEZONE: ${TURING_REPORT_TIMEZONE:-America/Los_Angeles}
       TURING_LOG_LEVEL: ${TURING_LOG_LEVEL:-INFO}
     networks:
       default:
@@ -60,6 +61,39 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+  reporter:
+    profiles: ["reporting"]
+    image: '${STACK_NAME?Variable not set}-backend:${TAG?Variable not set}'
+    entrypoint: ["python", "-m", "app.reporting"]
+    command: []
+    environment:
+      TURING_RENDER_DATA_DIR: /var/lib/turing
+      TURING_REPORT_TIMEZONE: ${TURING_REPORT_TIMEZONE:-America/Los_Angeles}
+      TURING_REPORT_HOSTNAME: ${DOMAIN?Variable not set}
+      TURING_CLOUDFLARE_ZONE_ID: ${TURING_CLOUDFLARE_ZONE_ID:-}
+      TURING_CLOUDFLARE_API_TOKEN_FILE: /run/secrets/turing-reporting/cloudflare-token
+      TURING_REPORT_TO: ${TURING_REPORT_TO:-}
+      TURING_REPORT_FROM: ${TURING_REPORT_FROM:-}
+      TURING_SMTP_HOST: ${TURING_SMTP_HOST:-}
+      TURING_SMTP_PORT: ${TURING_SMTP_PORT:-587}
+      TURING_SMTP_SECURITY: ${TURING_SMTP_SECURITY:-starttls}
+      TURING_SMTP_USER: ${TURING_SMTP_USER:-}
+      TURING_SMTP_PASSWORD_FILE: /run/secrets/turing-reporting/smtp-password
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid
+    volumes:
+      - render-data:/var/lib/turing
+      - ${TURING_REPORT_SECRETS_DIR:-./secrets/reporting}:/run/secrets/turing-reporting:ro
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 32
+    mem_limit: 128m
+    cpus: 0.25
+    restart: "no"
 
   frontend:
     image: '${STACK_NAME?Variable not set}-frontend:${TAG?Variable not set}'

@@ -18,6 +18,7 @@ from app.config import Settings
 from app.core.engine import SimulationError, TuringSimulator
 from app.core.models import ENGINE_VERSION
 from app.runtime import ComputeRuntime
+from app.usage import UsageStore
 
 ACTIVE_STATES = ("queued", "running")
 TERMINAL_STATES = ("completed", "failed", "cancelled", "expired", "interrupted")
@@ -107,9 +108,10 @@ def _render_artifact(
 
 
 class RenderJobManager:
-    def __init__(self, config: Settings, runtime: ComputeRuntime):
+    def __init__(self, config: Settings, runtime: ComputeRuntime, usage: UsageStore):
         self.config = config
         self.runtime = runtime
+        self.usage = usage
         self.data_dir = Path(config.render_data_dir).resolve()
         self.artifact_dir = self.data_dir / "artifacts"
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -152,7 +154,7 @@ class RenderJobManager:
                 """
             )
             now = time()
-            self._database.execute(
+            cursor = self._database.execute(
                 """
                 UPDATE render_jobs
                 SET state = 'interrupted', finished_at = ?,
@@ -161,6 +163,8 @@ class RenderJobManager:
                 """,
                 (now,),
             )
+            if cursor.rowcount:
+                self.usage.increment("render_failed", cursor.rowcount)
             self._database.execute(
                 "CREATE INDEX IF NOT EXISTS render_jobs_state_created "
                 "ON render_jobs(state, created_at)"
@@ -195,6 +199,7 @@ class RenderJobManager:
             ).fetchone()[0]
             if queued >= self.config.max_render_queue:
                 self.runtime.metrics.increment("render_jobs_rejected")
+                self.usage.increment("render_rejected")
                 raise RenderQueueFullError("The render queue is full.")
             client_active = self._database.execute(
                 "SELECT COUNT(*) FROM render_jobs "
@@ -203,6 +208,7 @@ class RenderJobManager:
             ).fetchone()[0]
             if client_active >= self.config.max_render_jobs_per_client:
                 self.runtime.metrics.increment("render_jobs_rejected")
+                self.usage.increment("render_rejected")
                 raise ClientRenderLimitError(
                     "This client already has the maximum number of active renders."
                 )
@@ -254,6 +260,7 @@ class RenderJobManager:
                     (now, job_id),
                 )
                 self.runtime.metrics.increment("render_jobs_cancelled")
+                self.usage.increment("render_cancelled")
             elif row["state"] == "running":
                 self._database.execute(
                     "UPDATE render_jobs SET cancel_requested = 1 WHERE id = ?",
@@ -373,6 +380,7 @@ class RenderJobManager:
                 if not self._claim(row["id"]):
                     continue
                 self.runtime.metrics.increment("render_jobs_started")
+                self.usage.record_peak("peak_compute_active", self.runtime.gate.active)
                 await self._run_job(row)
             finally:
                 self.runtime.gate.release()
@@ -399,10 +407,12 @@ class RenderJobManager:
                         error="The server shut down before this render completed.",
                     )
                     self.runtime.metrics.increment("render_jobs_failed")
+                    self.usage.increment("render_failed")
                     return
                 if self._cancel_requested(job_id):
                     self._update(job_id, state="cancelled", finished_at=time())
                     self.runtime.metrics.increment("render_jobs_cancelled")
+                    self.usage.increment("render_cancelled")
                     return
                 if monotonic() - started > self.config.render_job_timeout_seconds:
                     self._update(
@@ -412,6 +422,7 @@ class RenderJobManager:
                         error="The render exceeded its configured execution timeout.",
                     )
                     self.runtime.metrics.increment("render_jobs_failed")
+                    self.usage.increment("render_failed")
                     return
                 chunk = min(
                     self.config.render_chunk_steps,
@@ -434,9 +445,11 @@ class RenderJobManager:
                 expires_at=finished + self.config.render_artifact_ttl_seconds,
             )
             self.runtime.metrics.increment("render_jobs_completed")
+            self.usage.increment("render_completed")
             self._trim_artifacts()
         except SimulationError as error:
             self.runtime.metrics.increment("numerical_failures")
+            self.usage.increment("numerical_failures")
             self._update(
                 job_id,
                 state="failed",
@@ -444,6 +457,7 @@ class RenderJobManager:
                 error=f"The simulation failed: {error}",
             )
             self.runtime.metrics.increment("render_jobs_failed")
+            self.usage.increment("render_failed")
         except Exception as error:  # noqa: BLE001 - persisted for job diagnosis
             self._update(
                 job_id,
@@ -452,7 +466,9 @@ class RenderJobManager:
                 error=f"The render failed: {error}",
             )
             self.runtime.metrics.increment("render_jobs_failed")
+            self.usage.increment_many({"render_failed": 1, "internal_errors": 1})
         finally:
+            self.usage.increment("render_seconds", monotonic() - started)
             self._trim_history()
 
     def _expire_artifacts(self) -> None:

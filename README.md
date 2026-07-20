@@ -201,6 +201,9 @@ queue or corrupt the displayed development reference.
 Repeatable browser and maximum-grid server measurements are documented in
 [BUDGETS.md](BUDGETS.md).
 
+The optional daily operations digest is documented in [REPORTING.md](REPORTING.md),
+and the exact aggregate telemetry it retains is described in [PRIVACY.md](PRIVACY.md).
+
 The fixed-size PNG endpoint accepts the same controls and a seed:
 
 ```console

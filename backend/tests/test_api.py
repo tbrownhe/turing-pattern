@@ -61,6 +61,8 @@ def test_websocket_rejects_an_unapproved_browser_origin(client):
 
     assert caught.value.code == 1008
     assert client.get("/readyz").json()["active_compute_jobs"] == 0
+    usage = client.app.state.usage
+    assert usage.snapshot(usage.day_for())["live_sessions_rejected"] == 1
 
 
 def test_websocket_rejects_constructor_options(client):
@@ -267,6 +269,11 @@ def test_render_job_completes_persists_metadata_and_serves_an_artifact(client):
     repeated_artifact = client.get(repeated["artifact_url"])
     assert repeated["state"] == "completed"
     assert repeated_artifact.content == artifact.content
+    usage = client.app.state.usage
+    snapshot = usage.snapshot(usage.day_for())
+    assert snapshot["render_requests"] == 2
+    assert snapshot["render_completed"] == 2
+    assert snapshot["render_seconds"] > 0
 
 
 def test_render_job_can_be_cancelled_while_waiting_for_compute(client):
@@ -317,6 +324,10 @@ def test_uncalibrated_feature_scale_cannot_enter_the_queue(client):
 
     assert response.status_code == 422
     assert response.json()["detail"]["code"] == "render_plan_rejected"
+    usage = client.app.state.usage
+    snapshot = usage.snapshot(usage.day_for())
+    assert snapshot["render_requests"] == 1
+    assert snapshot["render_rejected"] == 1
 
 
 def test_terminal_render_history_is_bounded(client):

@@ -1,0 +1,11 @@
+[Unit]
+Description=Turing Pattern daily usage report
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/turing
+ExecStart=/usr/bin/docker compose --profile reporting run --rm reporter
+TimeoutStartSec=180

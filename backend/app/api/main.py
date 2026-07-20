@@ -45,6 +45,7 @@ from app.render_jobs import (
     RenderQueueFullError,
 )
 from app.runtime import ComputeRuntime
+from app.usage import UsageStore
 
 logger = logging.getLogger(__name__)
 
@@ -278,9 +279,12 @@ def create_app(config: Settings = settings) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         configure_logging(config.log_level)
+        usage = UsageStore(config.render_data_dir, config.report_timezone)
+        usage.increment("backend_starts")
+        application.state.usage = usage
         runtime = ComputeRuntime(config)
         application.state.runtime = runtime
-        render_jobs = RenderJobManager(config, runtime)
+        render_jobs = RenderJobManager(config, runtime, usage)
         application.state.render_jobs = render_jobs
         await render_jobs.start()
         monitor_stopped = asyncio.Event()
@@ -305,6 +309,7 @@ def create_app(config: Settings = settings) -> FastAPI:
             await asyncio.gather(monitor_task, return_exceptions=True)
             await render_jobs.close()
             runtime.close()
+            usage.close()
 
     application = FastAPI(
         title="Turing Pattern API",
@@ -370,8 +375,11 @@ def create_app(config: Settings = settings) -> FastAPI:
     async def queue_render(
         payload: RenderPlanRequest, request: Request, response: Response
     ) -> dict[str, object]:
+        usage: UsageStore = request.app.state.usage
+        usage.increment("render_requests")
         plan = _render_plan(payload, config)
         if not plan["accepted"]:
+            usage.increment("render_rejected")
             raise HTTPException(
                 status_code=422,
                 detail={
@@ -447,9 +455,11 @@ def create_app(config: Settings = settings) -> FastAPI:
         payload: TimeStudyRequest, request: Request, response: Response
     ) -> dict[str, object]:
         runtime: ComputeRuntime = request.app.state.runtime
+        usage: UsageStore = request.app.state.usage
         request_id = uuid4().hex
         if not await runtime.gate.acquire():
             runtime.metrics.increment("time_studies_rejected")
+            usage.increment("time_studies_rejected")
             raise HTTPException(
                 status_code=503,
                 detail={
@@ -462,6 +472,8 @@ def create_app(config: Settings = settings) -> FastAPI:
             )
 
         runtime.metrics.increment("time_studies_started")
+        usage.increment("time_studies_started")
+        usage.record_peak("peak_compute_active", runtime.gate.active)
         logger.info(
             "time study started",
             extra={"event": "time_study_started", "request_id": request_id},
@@ -471,15 +483,20 @@ def create_app(config: Settings = settings) -> FastAPI:
             checkpoints = await runtime.run(_time_study, payload, config.preview_size)
         except SimulationError as error:
             runtime.metrics.increment("numerical_failures")
+            usage.increment("numerical_failures")
             raise HTTPException(
                 status_code=422,
                 detail={"code": "simulation_failed", "message": str(error)},
                 headers={"X-Request-ID": request_id},
             ) from error
+        except Exception:
+            usage.increment("internal_errors")
+            raise
         finally:
             runtime.gate.release()
 
         runtime.metrics.increment("time_studies_finished")
+        usage.increment("time_studies_finished")
         response.headers["Cache-Control"] = "no-store"
         response.headers["X-Request-ID"] = request_id
         logger.info(
@@ -500,6 +517,7 @@ def create_app(config: Settings = settings) -> FastAPI:
     @application.post("/api/v1/generate", response_class=Response)
     async def generate(payload: RenderRequest, request: Request) -> Response:
         runtime: ComputeRuntime = request.app.state.runtime
+        usage: UsageStore = request.app.state.usage
         request_id = uuid4().hex
         if not await runtime.gate.acquire():
             runtime.metrics.increment("renders_rejected")
@@ -515,6 +533,7 @@ def create_app(config: Settings = settings) -> FastAPI:
             )
 
         runtime.metrics.increment("renders_started")
+        usage.record_peak("peak_compute_active", runtime.gate.active)
         logger.info(
             "render started",
             extra={"event": "render_started", "request_id": request_id},
@@ -524,11 +543,15 @@ def create_app(config: Settings = settings) -> FastAPI:
             result = await runtime.run(_render_png, payload, config)
         except SimulationError as error:
             runtime.metrics.increment("numerical_failures")
+            usage.increment("numerical_failures")
             raise HTTPException(
                 status_code=422,
                 detail={"code": "simulation_failed", "message": str(error)},
                 headers={"X-Request-ID": request_id},
             ) from error
+        except Exception:
+            usage.increment("internal_errors")
+            raise
         finally:
             runtime.gate.release()
 
@@ -562,12 +585,34 @@ def create_app(config: Settings = settings) -> FastAPI:
     @application.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket) -> None:
         runtime: ComputeRuntime = websocket.app.state.runtime
+        usage: UsageStore = websocket.app.state.usage
         session_id = uuid4().hex
         accepted = False
         tasks: set[asyncio.Task[None]] = set()
+        usage_started = False
+        usage_last_flush = monotonic()
+        usage_frames = 0
+        usage_bytes = 0
+
+        def flush_session_usage() -> None:
+            nonlocal usage_last_flush, usage_frames, usage_bytes
+            if not usage_started:
+                return
+            now = monotonic()
+            usage.increment_many(
+                {
+                    "live_session_seconds": now - usage_last_flush,
+                    "live_frames": usage_frames,
+                    "live_frame_bytes": usage_bytes,
+                }
+            )
+            usage_last_flush = now
+            usage_frames = 0
+            usage_bytes = 0
 
         if not _origin_is_allowed(websocket, config):
             runtime.metrics.increment("sessions_rejected")
+            usage.increment("live_sessions_rejected")
             logger.warning(
                 "websocket origin rejected",
                 extra={
@@ -583,6 +628,7 @@ def create_app(config: Settings = settings) -> FastAPI:
 
         if not await runtime.gate.acquire():
             runtime.metrics.increment("sessions_rejected")
+            usage.increment("live_sessions_rejected")
             await websocket.accept()
             await _send_error_and_close(
                 websocket,
@@ -593,6 +639,10 @@ def create_app(config: Settings = settings) -> FastAPI:
             return
 
         runtime.metrics.increment("sessions_started")
+        usage.increment("live_sessions_admitted")
+        usage.record_peak("peak_compute_active", runtime.gate.active)
+        usage_started = True
+        usage_last_flush = monotonic()
         logger.info(
             "websocket started",
             extra={"event": "websocket_started", "session_id": session_id},
@@ -644,7 +694,7 @@ def create_app(config: Settings = settings) -> FastAPI:
             )
 
             async def send_frame(frame: FrameResult, applied_revision: int) -> None:
-                nonlocal frame_id
+                nonlocal frame_id, usage_frames, usage_bytes
                 async with send_lock:
                     frame_id += 1
                     await websocket.send_json(
@@ -656,6 +706,15 @@ def create_app(config: Settings = settings) -> FastAPI:
                         }
                     )
                     await websocket.send_bytes(frame.content)
+                    usage_frames += 1
+                    usage_bytes += len(frame.content)
+                    if usage_frames >= 100:
+                        flush_session_usage()
+
+            async def flush_usage_periodically() -> None:
+                while True:
+                    await asyncio.sleep(60)
+                    flush_session_usage()
 
             async def receive_controls() -> None:
                 nonlocal controls_revision, last_activity
@@ -731,6 +790,9 @@ def create_app(config: Settings = settings) -> FastAPI:
             tasks = {
                 asyncio.create_task(receive_controls(), name=f"receive-{session_id}"),
                 asyncio.create_task(send_frames(), name=f"frames-{session_id}"),
+                asyncio.create_task(
+                    flush_usage_periodically(), name=f"usage-{session_id}"
+                ),
             }
             done, pending = await asyncio.wait(
                 tasks, return_when=asyncio.FIRST_COMPLETED
@@ -749,6 +811,7 @@ def create_app(config: Settings = settings) -> FastAPI:
                 )
         except SimulationError:
             runtime.metrics.increment("numerical_failures")
+            usage.increment("numerical_failures")
             logger.exception(
                 "websocket simulation failed",
                 extra={"event": "websocket_failed", "session_id": session_id},
@@ -761,6 +824,7 @@ def create_app(config: Settings = settings) -> FastAPI:
                     close_code=1011,
                 )
         except Exception:
+            usage.increment("internal_errors")
             logger.exception(
                 "websocket failed",
                 extra={"event": "websocket_failed", "session_id": session_id},
@@ -778,6 +842,8 @@ def create_app(config: Settings = settings) -> FastAPI:
                     task.cancel()
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
+            flush_session_usage()
+            usage.increment("live_sessions_finished")
             runtime.gate.release()
             runtime.metrics.increment("sessions_finished")
             logger.info(

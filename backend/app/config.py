@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import tempfile
 from dataclasses import dataclass
+from zoneinfo import ZoneInfo
 
 
 def _get_int(name: str, default: int, *, minimum: int, maximum: int) -> int:
@@ -52,6 +53,15 @@ def _get_log_level(name: str, default: str = "INFO") -> str:
     return value
 
 
+def _get_timezone(name: str, default: str = "America/Los_Angeles") -> str:
+    value = os.getenv(name, default)
+    try:
+        ZoneInfo(value)
+    except (KeyError, ValueError) as error:
+        raise ValueError(f"{name} must be an IANA timezone name") from error
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     allowed_origins: tuple[str, ...]
@@ -81,6 +91,7 @@ class Settings:
     max_render_artifacts: int
     max_render_job_history: int
     render_chunk_steps: int
+    report_timezone: str
     log_level: str
 
     @classmethod
@@ -177,6 +188,7 @@ class Settings:
             render_chunk_steps=_get_int(
                 "TURING_RENDER_CHUNK_STEPS", 100, minimum=10, maximum=1000
             ),
+            report_timezone=_get_timezone("TURING_REPORT_TIMEZONE"),
             log_level=_get_log_level("TURING_LOG_LEVEL"),
         )
 

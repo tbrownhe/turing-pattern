@@ -5,3 +5,4 @@
 .env
 .pytest_cache/
 /soak-results.json
+/secrets/
