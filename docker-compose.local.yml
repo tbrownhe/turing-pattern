@@ -1,20 +1,91 @@
 services:
-
   backend:
-    image: 'backend:${TAG:-latest}'
-    restart: always
+    image: 'turing-backend:${TAG:-dev}'
+    restart: on-failure:5
     build:
       context: ./backend
+      args:
+        APP_VERSION: ${APP_VERSION:-1.0.0}
+    environment:
+      OPENBLAS_NUM_THREADS: ${OPENBLAS_NUM_THREADS:-1}
+      OMP_NUM_THREADS: ${OMP_NUM_THREADS:-1}
+      TURING_ALLOWED_ORIGINS: ${TURING_LOCAL_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173}
+      TURING_ENABLE_DOCS: "true"
+      TURING_MAX_COMPUTE_JOBS: ${TURING_MAX_COMPUTE_JOBS:-2}
+      TURING_MAX_COMPUTE_WAITERS: ${TURING_MAX_COMPUTE_WAITERS:-2}
+      TURING_COMPUTE_WORKERS: ${TURING_COMPUTE_WORKERS:-2}
+      TURING_MAX_RENDER_SIMULATION_PIXELS: ${TURING_MAX_RENDER_SIMULATION_PIXELS:-1048576}
+      TURING_MAX_RENDER_OUTPUT_EDGE: ${TURING_MAX_RENDER_OUTPUT_EDGE:-4096}
+      TURING_BENCHMARK_ITERATIONS_PER_SECOND: ${TURING_BENCHMARK_ITERATIONS_PER_SECOND:-421.2}
+      TURING_RENDER_DATA_DIR: /var/lib/turing
+      TURING_MAX_RENDER_QUEUE: ${TURING_MAX_RENDER_QUEUE:-3}
+      TURING_MAX_RENDER_JOBS_PER_CLIENT: ${TURING_MAX_RENDER_JOBS_PER_CLIENT:-2}
+      TURING_RENDER_JOB_TIMEOUT_SECONDS: ${TURING_RENDER_JOB_TIMEOUT_SECONDS:-900}
+      TURING_RENDER_ARTIFACT_TTL_SECONDS: ${TURING_RENDER_ARTIFACT_TTL_SECONDS:-86400}
+      TURING_MAX_RENDER_ARTIFACTS: ${TURING_MAX_RENDER_ARTIFACTS:-8}
+      TURING_MAX_RENDER_JOB_HISTORY: ${TURING_MAX_RENDER_JOB_HISTORY:-64}
+      TURING_RENDER_CHUNK_STEPS: ${TURING_RENDER_CHUNK_STEPS:-100}
+      TURING_REPORT_TIMEZONE: ${TURING_REPORT_TIMEZONE:-America/Los_Angeles}
+      TURING_LOG_LEVEL: ${TURING_LOG_LEVEL:-INFO}
     ports:
-      - "8000:8000"   # Expose FastAPI backend at http://localhost:8000
+      - "127.0.0.1:8000:8000"
+    networks:
+      default:
+        aliases:
+          - turing-backend
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+    cpus: ${BACKEND_CPU_LIMIT:-4.0}
+    mem_limit: ${BACKEND_MEMORY_LIMIT:-2g}
+    pids_limit: 128
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid
+    volumes:
+      - render-data:/var/lib/turing
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
 
   frontend:
-    image: nginx:alpine
-    restart: always
+    image: 'turing-frontend:${TAG:-dev}'
+    restart: on-failure:5
+    depends_on:
+      backend:
+        condition: service_healthy
     build:
       context: ./frontend
       args:
-        - VITE_API_URL=http://localhost:8000
+        APP_VERSION: ${APP_VERSION:-1.0.0}
     ports:
-      - "3000:80"     # Expose frontend at http://localhost:3000
-    
+      - "${TURING_LOCAL_BIND_ADDRESS:-127.0.0.1}:3000:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    cpus: ${FRONTEND_CPU_LIMIT:-0.5}
+    mem_limit: ${FRONTEND_MEMORY_LIMIT:-256m}
+    pids_limit: 64
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 15s
+
+volumes:
+  render-data:
+
+networks:
+  default:
+    driver: bridge

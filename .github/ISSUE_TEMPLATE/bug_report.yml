@@ -1,0 +1,40 @@
+name: Bug report
+description: Report a reproducible problem with the application or documentation.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Gray-Scott Turing Pattern Lab. For a security
+        vulnerability, stop here and use private vulnerability reporting from the
+        repository Security tab instead.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the problem and what you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Provide the smallest safe sequence that reproduces the problem.
+      placeholder: |
+        1. Open ...
+        2. Set ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Application release, browser/device, or self-hosted platform as relevant.
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add screenshots or non-sensitive logs if they help. Never include credentials.

@@ -1,25 +1,22 @@
-# Stage 1: Build the frontend
-FROM node:20 AS builder
+FROM node:20@sha256:8f693eaa7e0a8e71560c9a82b55fd54c2ae920a2ba5d2cde28bac7d1c01c9ba5 AS builder
+
 WORKDIR /app
-
-# Install dependencies and build
-COPY package*.json /app/
-
-RUN npm install
-
-COPY ./ /app/
-
-ARG VITE_API_URL=${VITE_API_URL}
-
+COPY package*.json ./
+RUN npm ci
+COPY . .
 RUN npm run build
 
-# Stage 2: Serve with Nginx
-FROM nginx:alpine 
+FROM nginx:1.29.8-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de
 
-# Copy built files into container
+ARG APP_VERSION=1.0.0
+LABEL org.opencontainers.image.title="Gray-Scott Turing Pattern frontend" \
+      org.opencontainers.image.version=$APP_VERSION
+
+COPY nginx-main.conf /etc/nginx/nginx.conf
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=builder /app/dist /usr/share/nginx/html
-COPY ./nginx.conf /etc/nginx/conf.d/default.conf
-COPY ./nginx-backend-not-found.conf /etc/nginx/extra-conf.d/backend-not-found.conf
 
-EXPOSE 80
+USER nginx
+EXPOSE 8080
+ENTRYPOINT []
 CMD ["nginx", "-g", "daemon off;"]

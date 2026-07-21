@@ -1,0 +1,7 @@
+-r requirements.txt
+httpx2>=2,<4
+mypy>=1.15,<2
+pip-audit>=2.9,<3
+pytest>=8,<9
+ruff>=0.12,<1
+types-psutil>=7,<8

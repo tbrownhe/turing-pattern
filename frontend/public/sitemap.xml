@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset
+  xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+  xmlns:image="http://www.google.com/schemas/sitemap-image/1.1"
+>
+  <url>
+    <loc>https://turing.tobiasbrownheft.xyz/</loc>
+    <image:image>
+      <image:loc>https://turing.tobiasbrownheft.xyz/pattern-example.png</image:loc>
+      <image:title>Gray-Scott reaction-diffusion Turing pattern</image:title>
+      <image:caption>A generated field moving from spots through maze-like stripes to dense organic textures.</image:caption>
+    </image:image>
+  </url>
+</urlset>
