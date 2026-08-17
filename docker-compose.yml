@@ -1,7 +1,7 @@
 services:
   backend:
     image: '${STACK_NAME?Variable not set}-backend:${TAG?Variable not set}'
-    restart: on-failure:5
+    restart: always
     build:
       context: ./backend
       args:
@@ -99,7 +99,7 @@ services:
 
   frontend:
     image: '${STACK_NAME?Variable not set}-frontend:${TAG?Variable not set}'
-    restart: on-failure:5
+    restart: always
     depends_on:
       backend:
         condition: service_healthy
